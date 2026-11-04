@@ -1,0 +1,1053 @@
+const TIPOS = [
+  'Subestação',
+  'Estado de conservação da Subestação',
+  'Vegetação em contato com a rede',
+  'Postes danificados',
+  'Postes fora de prumo ou fletido',
+  'Para-raios atuados ou ausentes',
+  'Redes com condutores desnivelados',
+  'Rede fora do espaçador ou do isolador',
+  'Cruzetas danificadas',
+  'Cruzetas Giradas ou fora da bissetriz',
+  'Ausência de distanciamento mínimo',
+  'Transformador com vazamento ou merejamento de óleo',
+  'Transformador com oxidação ou corrosão',
+  'Instalações e equipamentos sem uso/inativos',
+  'Ausência de aterramento',
+  'Cabo neutro cortado/ausente',
+  'Outras constatações',
+];
+
+const $ = id => document.getElementById(id);
+const novoId = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+const fmt = Relatorio.formatarDataHora;
+// Registros antigos não guardavam o alimentador: usam o da inspeção.
+const alimDe = reg => reg.alimentador || estado.inspecao.alimentador;
+
+const estado = {
+  inspecao: null,      // inspeção aberta
+  registro: null,      // registro em edição (null = novo)
+  foto: null,          // { blob, largura, altura }
+  coordsManual: false, // usuário escolheu no mapa ou digitou: o GPS não sobrescreve
+  gpsWatch: null,
+  urls: [],            // object URLs das miniaturas, liberadas ao redesenhar
+  rede: null,          // dados da rede do alimentador da inspeção aberta (BDGD), quando carregados
+  nRegistros: 0,
+};
+
+/* ------------------------------ utilidades ------------------------------ */
+
+let avisoTimer;
+function avisar(msg, ms = 3500) {
+  const el = $('aviso');
+  el.textContent = msg; el.hidden = false;
+  clearTimeout(avisoTimer);
+  avisoTimer = setTimeout(() => { el.hidden = true; }, ms);
+}
+
+function lerDataHora(txt) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})$/.exec(txt.trim());
+  if (!m) return null;
+  const [, d, mo, a, h, mi, s] = m.map(Number);
+  const dt = new Date(a, mo - 1, d, h, mi, s);
+  if (dt.getDate() !== d || dt.getMonth() !== mo - 1 || h > 23 || mi > 59 || s > 59) return null;
+  return dt.getTime();
+}
+
+// Máscara dd/mm/aaaa hh:mm:ss enquanto digita.
+$('fData').addEventListener('input', e => {
+  const dig = e.target.value.replace(/\D/g, '').slice(0, 14);
+  const partes = [dig.slice(0, 2), dig.slice(2, 4), dig.slice(4, 8), dig.slice(8, 10), dig.slice(10, 12), dig.slice(12, 14)];
+  const seps = ['', '/', '/', ' ', ':', ':'];
+  let out = '';
+  partes.forEach((p, i) => { if (p) out += (i ? seps[i] : '') + p; });
+  e.target.value = out;
+});
+
+const numero = txt => {
+  const v = parseFloat(String(txt).replace(',', '.'));
+  return Number.isFinite(v) ? v : null;
+};
+
+// Versão de teste publicada como artefato do claude.ai: sem GPS, mapa, compartilhamento
+// nem modo offline; arquivos saem pelo "downloads" do artefato.
+const MODO_ARTEFATO = !!window.MODO_ARTEFATO;
+let downloadsArtefato = null;
+if (MODO_ARTEFATO && window.claude) window.claude.use('downloads').then(d => { downloadsArtefato = d; });
+
+async function baixar(blob, nome) {
+  if (MODO_ARTEFATO) {
+    if (!downloadsArtefato) { avisar('Salvar arquivos não está disponível nesta visualização.', 6000); return false; }
+    try { await downloadsArtefato.save({ filename: nome, data: blob }); return true; }
+    catch (e) { if (e.code !== 'declined') avisar('Não foi possível salvar: ' + e.message, 6000); return false; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+  return true;
+}
+
+// Confirmação dentro da página (o confirm() do navegador não aparece em todos os lugares).
+function confirmar(mensagem, botao = 'Excluir') {
+  const dlg = $('dlgConfirmar');
+  $('dlgConfirmarTexto').textContent = mensagem;
+  $('dlgConfirmarOk').textContent = botao;
+  dlg.showModal();
+  return new Promise(ok => dlg.addEventListener('close', () => ok(dlg.returnValue === 'ok'), { once: true }));
+}
+
+async function comprimirFoto(arquivo) {
+  const url = URL.createObjectURL(arquivo);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const MAX = 2400; // guardada em alta; o relatório reduz conforme a qualidade da inspeção
+    const f = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+    const largura = Math.round(img.naturalWidth * f), altura = Math.round(img.naturalHeight * f);
+    const cv = document.createElement('canvas');
+    cv.width = largura; cv.height = altura;
+    cv.getContext('2d').drawImage(img, 0, 0, largura, altura);
+    const blob = await new Promise(ok => cv.toBlob(ok, 'image/jpeg', 0.88));
+    return { blob, largura, altura };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/* ------------------------------ navegação ------------------------------ */
+
+const TELAS = ['telaInicio', 'telaInspecao', 'telaRegistro', 'telaArquivos'];
+function mostrar(tela, titulo) {
+  TELAS.forEach(t => { $(t).hidden = t !== tela; });
+  $('titulo').textContent = titulo;
+  $('btnVoltar').hidden = tela === 'telaInicio';
+  if (tela !== 'telaRegistro') pararGps();
+  window.scrollTo(0, 0);
+}
+
+// O botão "voltar" do Android passa pelo histórico.
+function ir(tela, dados = {}) { history.pushState({ tela, ...dados }, ''); }
+window.addEventListener('popstate', e => abrirPorEstado(e.state));
+$('btnVoltar').addEventListener('click', () => history.back());
+
+async function abrirPorEstado(s) {
+  if (!s || s.tela === 'telaInicio') return telaInicio();
+  if (s.tela === 'telaInspecao') return telaInspecao(s.inspecaoId);
+  if (s.tela === 'telaArquivos') return telaArquivos();
+  if (s.tela === 'telaRegistro') {
+    if (!estado.inspecao) return telaInicio();
+    return telaRegistro(s.registroId || null);
+  }
+}
+
+/* ------------------------------ tela inicial ------------------------------ */
+
+async function telaInicio() {
+  estado.inspecao = null;
+  mostrar('telaInicio', 'Inspeção de Redes 2.0');
+  const insps = (await DB.todos('inspecoes')).sort((a, b) => b.criadaEm - a.criadaEm);
+  const regs = await DB.todos('registros');
+  const ul = $('listaInspecoes');
+  ul.innerHTML = '';
+  $('semInspecoes').hidden = insps.length > 0;
+  for (const i of insps) {
+    const n = regs.filter(r => r.inspecaoId === i.id).length;
+    const li = document.createElement('li');
+    li.innerHTML = `<div class="info"><strong></strong><small></small></div><span>&#8250;</span>`;
+    li.querySelector('strong').textContent = `Alim. ${i.alimentador}`;
+    li.querySelector('small').textContent = (i.distribuidora ? `${i.distribuidora.nome} · ` : '') +
+      `Iniciada em ${fmt(i.criadaEm)} · ${n} ${n === 1 ? 'registro' : 'registros'}`;
+    li.addEventListener('click', () => { ir('telaInspecao', { inspecaoId: i.id }); telaInspecao(i.id); });
+    ul.appendChild(li);
+  }
+}
+
+const QUALIDADES = Relatorio.QUALIDADES;
+const qualidadeDe = insp => (QUALIDADES[insp.qualidade] ? insp.qualidade : 'media');
+$('dlgQualidade').append(...Object.entries(QUALIDADES).map(([v, q]) => new Option(q.rotulo, v)));
+const dicaQualidade = () => { $('dlgQualidadeDica').textContent = QUALIDADES[$('dlgQualidade').value].dica; };
+$('dlgQualidade').addEventListener('change', dicaQualidade);
+
+// Distribuidora e alimentador: a lista vem da BDGD da ANEEL (pasta dados/). Sem internet e sem a lista
+// guardada, o alimentador pode ser digitado; nesse caso a rede não aparece no mapa.
+const escolha = { lista: null, alim: null, avisouFora: false };
+
+async function prepararDistribuidoras() {
+  const sel = $('dlgDist');
+  if (sel.options.length > 1) return;
+  sel.replaceChildren(new Option('Carregando…', ''));
+  try {
+    const idx = await Rede.distribuidoras();
+    sel.replaceChildren(new Option('Selecione…', ''), ...idx.distribuidoras.map(d => new Option(d.nome, d.id)));
+  } catch (e) {
+    sel.replaceChildren(new Option('Lista indisponível (sem internet)', ''));
+  }
+}
+
+const dicaAlim = (txt, classe = '') => { $('dlgAlimDica').textContent = txt; $('dlgAlimDica').className = 'dica ' + classe; };
+const descreverAlim = a => [a.cod !== a.nome ? a.cod : '', a.subNome || a.sub ? `SE ${a.subNome || a.sub}` : '',
+  `${a.trafos} ${a.trafos === 1 ? 'transformador' : 'transformadores'}`].filter(Boolean).join(' · ');
+
+async function carregarListaAlims() {
+  const id = $('dlgDist').value;
+  escolha.lista = null;
+  escolha.alim = null;
+  mostrarSugestoes(false);
+  if (!id) { dicaAlim($('dlgDist').options.length > 1 ? 'Escolha a distribuidora para ver a lista de alimentadores.' : ''); return; }
+  dicaAlim('Carregando a lista de alimentadores…');
+  try {
+    const lista = await Rede.alimentadores(id);
+    if ($('dlgDist').value !== id) return;
+    escolha.lista = lista;
+    escolherDigitado();
+    if (!escolha.alim) dicaAlim(`${lista.length} alimentadores na base da ANEEL. Digite para filtrar e toque no alimentador.`);
+  } catch (e) {
+    if ($('dlgDist').value !== id) return;
+    dicaAlim('Sem internet: a lista de alimentadores não está disponível. Digite o nome; a rede só aparece no mapa se o alimentador for escolhido da lista.', 'busca');
+  }
+}
+
+// Se o texto digitado é exatamente um alimentador da lista, considera-o escolhido.
+function escolherDigitado() {
+  const v = $('dlgAlimInput').value.trim();
+  escolha.alim = (v && escolha.lista && escolha.lista.find(a => Rede.igual(v, a.nome) || Rede.igual(v, a.cod))) || null;
+  if (escolha.alim) dicaAlim(`Alimentador da base da ANEEL: ${descreverAlim(escolha.alim)}.`, 'ok');
+}
+
+function mostrarSugestoes(mostrar = true) {
+  const ul = $('dlgAlimLista');
+  ul.hidden = !mostrar || !escolha.lista;
+  if (ul.hidden) return;
+  const achados = Rede.filtrar(escolha.lista, $('dlgAlimInput').value);
+  ul.replaceChildren(...achados.map((a, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = '<strong></strong><small></small>';
+    li.querySelector('strong').textContent = a.nome;
+    li.querySelector('small').textContent = descreverAlim(a);
+    if (i === 0) li.className = 'ativo';
+    // mousedown/touch antes do blur do campo, para o toque não se perder
+    li.addEventListener('mousedown', e => e.preventDefault());
+    li.addEventListener('click', () => selecionarAlim(a));
+    return li;
+  }));
+  if (!achados.length) {
+    const li = document.createElement('li');
+    li.className = 'vazio';
+    li.textContent = 'Nenhum alimentador com esse nome nesta distribuidora.';
+    ul.appendChild(li);
+  }
+}
+
+function selecionarAlim(a) {
+  $('dlgAlimInput').value = Rede.rotulo(a);
+  escolha.alim = a;
+  mostrarSugestoes(false);
+  dicaAlim(`Alimentador da base da ANEEL: ${descreverAlim(a)}.`, 'ok');
+}
+
+$('dlgDist').addEventListener('change', carregarListaAlims);
+$('dlgAlimInput').addEventListener('input', () => {
+  escolha.alim = null;
+  escolha.avisouFora = false;
+  escolherDigitado();
+  if (!escolha.alim && escolha.lista) dicaAlim('');
+  mostrarSugestoes();
+});
+$('dlgAlimInput').addEventListener('focus', () => { if (!escolha.alim) mostrarSugestoes(); });
+$('dlgAlimInput').addEventListener('blur', () => setTimeout(() => mostrarSugestoes(false), 150));
+$('dlgAlimInput').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const primeiro = !$('dlgAlimLista').hidden && escolha.lista && Rede.filtrar(escolha.lista, $('dlgAlimInput').value, 1)[0];
+  if (primeiro) selecionarAlim(primeiro); else $('dlgAlimOk').click();
+});
+
+$('dlgAlimOk').addEventListener('click', () => {
+  const v = $('dlgAlimInput').value.trim();
+  const temLista = $('dlgDist').options.length > 1;
+  if (temLista && !$('dlgDist').value) { dicaAlim('Escolha a distribuidora.', 'erro'); $('dlgDist').focus(); return; }
+  if (!v) { dicaAlim('Informe o alimentador.', 'erro'); $('dlgAlimInput').focus(); return; }
+  escolherDigitado();
+  if (!escolha.alim && escolha.lista && !escolha.avisouFora) {
+    escolha.avisouFora = true;
+    dicaAlim('Este alimentador não está na lista da ANEEL, então a rede não aparecerá no mapa. Toque de novo para continuar assim, ou escolha um da lista.', 'erro');
+    return;
+  }
+  $('dlgAlim').close('ok');
+});
+
+// Pergunta distribuidora, alimentador e qualidade das fotos; devolve os dados da inspeção ou null.
+function perguntarInspecao(titulo, { alimentador = '', qualidade = 'media', distribuidora = null, circuito = null } = {}, botao = 'Iniciar') {
+  const dlg = $('dlgAlim');
+  $('dlgAlimTitulo').textContent = titulo;
+  $('dlgAlimOk').textContent = botao;
+  $('dlgAlimInput').value = alimentador;
+  $('dlgQualidade').value = qualidade;
+  dicaQualidade();
+  dicaAlim('');
+  escolha.avisouFora = false;
+  mostrarSugestoes(false);
+  dlg.showModal();
+  prepararDistribuidoras().then(() => {
+    const sel = $('dlgDist');
+    if (distribuidora && ![...sel.options].some(o => o.value === distribuidora.id)) sel.append(new Option(distribuidora.nome, distribuidora.id));
+    sel.value = distribuidora ? distribuidora.id : '';
+    return carregarListaAlims();
+  }).then(() => {
+    if (circuito && escolha.lista) {
+      const a = escolha.lista.find(x => x.arq === circuito.arq);
+      if (a && Rede.igual($('dlgAlimInput').value, Rede.rotulo(a))) selecionarAlim(a);
+    }
+  });
+  if (!alimentador) setTimeout(() => ($('dlgDist').value ? $('dlgAlimInput') : $('dlgDist')).focus(), 50);
+  return new Promise(ok => {
+    dlg.addEventListener('close', () => {
+      mostrarSugestoes(false);
+      const v = $('dlgAlimInput').value.trim();
+      if (dlg.returnValue !== 'ok' || !v) return ok(null);
+      const sel = $('dlgDist');
+      const a = escolha.alim;
+      ok({
+        alimentador: v,
+        qualidade: $('dlgQualidade').value,
+        distribuidora: sel.value ? { id: sel.value, nome: sel.options[sel.selectedIndex].text } : distribuidora,
+        circuito: a ? { cod: a.cod, nome: a.nome, sub: a.sub, subNome: a.subNome, arq: a.arq } : null,
+      });
+    }, { once: true });
+  });
+}
+
+$('btnNovaInspecao').addEventListener('click', async () => {
+  const dados = await perguntarInspecao('Nova inspeção');
+  if (!dados) return;
+  const insp = { id: novoId(), ...dados, criadaEm: Date.now() };
+  await DB.salvar('inspecoes', insp);
+  if (insp.circuito) Rede.dados(insp.distribuidora.id, insp.circuito.arq).catch(() => {}); // já guarda para uso offline
+  sincronizar(insp.id);
+  ir('telaInspecao', { inspecaoId: insp.id });
+  telaInspecao(insp.id);
+});
+
+/* ------------------------------ tela da inspeção ------------------------------ */
+
+async function registrosOrdenados(inspecaoId) {
+  return (await DB.registrosDe(inspecaoId)).sort((a, b) => a.dataHora - b.dataHora);
+}
+
+const atualizarBotaoMapa = () => { $('btnMapaInsp').disabled = !estado.nRegistros && !estado.rede; };
+
+// Carrega a rede do alimentador (com internet, ou da cópia guardada pelo app).
+async function carregarRede(insp) {
+  estado.rede = null;
+  atualizarBotaoMapa();
+  const st = $('redeStatus');
+  const status = (txt, classe = '') => { st.textContent = txt; st.className = 'rede-status ' + classe; };
+  if (MODO_ARTEFATO || !insp.circuito || !insp.distribuidora) {
+    status(insp.distribuidora && !insp.circuito ? 'Alimentador fora da lista da ANEEL: sem rede no mapa.' : '');
+    return;
+  }
+  status('Carregando a rede do alimentador…');
+  try {
+    const d = await Rede.dados(insp.distribuidora.id, insp.circuito.arq);
+    if (!estado.inspecao || estado.inspecao.id !== insp.id) return;
+    estado.rede = d;
+    const n = (v, s, p) => `${v.length} ${v.length === 1 ? s : p}`;
+    status(`Rede no mapa: ${n(d.trafos, 'transformador', 'transformadores')}, ${n(d.chaves, 'chave', 'chaves')} (BDGD/ANEEL).`, 'ok');
+  } catch (e) {
+    if (!estado.inspecao || estado.inspecao.id !== insp.id) return;
+    status(navigator.onLine ? 'Não foi possível carregar a rede do alimentador.' : 'Sem internet: a rede do alimentador aparece no mapa quando houver conexão.', 'erro');
+  }
+  atualizarBotaoMapa();
+}
+addEventListener('online', () => {
+  if (estado.inspecao && !estado.rede && !$('telaInspecao').hidden) carregarRede(estado.inspecao);
+});
+
+async function telaInspecao(id) {
+  const insp = await DB.obter('inspecoes', id);
+  if (!insp) return telaInicio();
+  const mesmaRede = estado.inspecao && estado.inspecao.id === insp.id && estado.rede;
+  estado.inspecao = insp;
+  mostrar('telaInspecao', `Alim. ${insp.alimentador}`);
+  $('distAtual').textContent = insp.distribuidora ? insp.distribuidora.nome : '';
+  $('distAtual').hidden = !insp.distribuidora;
+  $('alimAtual').textContent = insp.alimentador;
+  if (!mesmaRede) carregarRede(insp);
+  $('qualidadeAtual').textContent = `Fotos no relatório: qualidade ${QUALIDADES[qualidadeDe(insp)].rotulo.toLowerCase()}`;
+
+  estado.urls.forEach(URL.revokeObjectURL);
+  estado.urls = [];
+  const regs = await registrosOrdenados(id);
+  $('tituloRegistros').textContent = `Registros (${regs.length})`;
+  $('semRegistros').hidden = regs.length > 0;
+  ['btnDocx', 'btnPdf'].forEach(b => { $(b).disabled = regs.length === 0; });
+  estado.nRegistros = regs.length;
+  atualizarBotaoMapa();
+
+  const ul = $('listaRegistros');
+  ul.innerHTML = '';
+  regs.forEach((r, i) => {
+    const url = URL.createObjectURL(r.foto);
+    estado.urls.push(url);
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="num">${i + 1}</span><img alt=""><div class="info"><strong></strong><small></small><small></small></div>`;
+    li.querySelector('img').src = url;
+    li.querySelector('strong').textContent = r.tipo;
+    const [s1, s2] = li.querySelectorAll('small');
+    s1.textContent = r.descricao || '—';
+    s2.textContent = `${fmt(r.dataHora)} · ${r.lat.toFixed(6)}, ${r.lon.toFixed(6)}`;
+    if (alimDe(r) !== insp.alimentador) s1.textContent = `Alim. ${alimDe(r)} · ${s1.textContent}`;
+    li.addEventListener('click', () => { ir('telaRegistro', { registroId: r.id }); telaRegistro(r.id); });
+    ul.appendChild(li);
+  });
+}
+
+$('btnEditarAlim').addEventListener('click', async () => {
+  const id = estado.inspecao.id;
+  const i = estado.inspecao;
+  const dados = await perguntarInspecao('Dados da inspeção',
+    { alimentador: i.alimentador, qualidade: qualidadeDe(i), distribuidora: i.distribuidora || null, circuito: i.circuito || null }, 'Salvar');
+  if (!dados) return;
+  // Registros que seguiam o alimentador da inspeção acompanham a mudança; os alterados à mão ficam como estão.
+  const antigo = estado.inspecao.alimentador;
+  if (dados.alimentador !== antigo)
+    for (const r of await DB.registrosDe(id))
+      if (!r.alimentador || r.alimentador === antigo) await DB.salvar('registros', { ...r, alimentador: dados.alimentador, versao: Date.now() });
+  await DB.salvar('inspecoes', { ...(await DB.obter('inspecoes', id)), ...dados });
+  sincronizar(id);
+  estado.rede = null; // recarrega a rede, que pode ter mudado
+  estado.inspecao = null;
+  telaInspecao(id);
+});
+
+$('btnNovoRegistro').addEventListener('click', () => { ir('telaRegistro'); telaRegistro(null); });
+
+$('btnExcluirInsp').addEventListener('click', async () => {
+  if (!await confirmar(`Excluir a inspeção do alimentador ${estado.inspecao.alimentador} e todos os seus registros e fotos? Os relatórios já gerados continuam na pasta Relatórios. Isso não pode ser desfeito.`)) return;
+  const insp = await DB.obter('inspecoes', estado.inspecao.id);
+  await DB.excluirInspecao(insp.id);
+  await removerPastasDe(insp);
+  history.back();
+});
+
+async function gerar(tipo) {
+  const regs = await registrosOrdenados(estado.inspecao.id);
+  const botao = $(tipo === 'docx' ? 'btnDocx' : 'btnPdf');
+  const rotulo = botao.textContent;
+  botao.disabled = true; botao.textContent = 'Gerando…';
+  try {
+    const blob = tipo === 'docx'
+      ? await Relatorio.gerarDocx(estado.inspecao, regs, TIPOS)
+      : await Relatorio.gerarPdf(estado.inspecao, regs, TIPOS);
+    const arquivo = new File([blob], Relatorio.nomeArquivo(estado.inspecao.alimentador, tipo), { type: blob.type || (tipo === 'pdf' ? 'application/pdf' : '') });
+    let pastaInfo = '';
+    if (Pastas.suportado) {
+      try { await Pastas.gravar(`${Pastas.RELATORIOS}/${arquivo.name}`, arquivo); pastaInfo = 'Guardado na pasta Relatórios do app.'; }
+      catch (e) { console.error(e); pastaInfo = 'Não foi possível guardar na pasta Relatórios do app.'; }
+    }
+    const a = estado.inspecao.alimentador;
+    oferecerArquivo(arquivo, {
+      titulo: 'Relatório pronto', pastaInfo,
+      compartilhar: { title: `Relatório fotográfico - Alim. ${a}`, text: `Relatório fotográfico da inspeção do alimentador ${a}.` },
+    });
+  } catch (e) {
+    console.error(e);
+    avisar('Não foi possível gerar o relatório: ' + e.message, 6000);
+  } finally {
+    botao.disabled = false; botao.textContent = rotulo;
+  }
+}
+// O compartilhamento precisa partir de um toque do usuário, por isso vem numa janela
+// depois de preparar o arquivo (a geração pode demorar mais do que o navegador permite).
+const mb = bytes => `${(bytes / 1048576).toFixed(1).replace('.', ',')} MB`;
+let arquivoPronto = null;
+function oferecerArquivo(arquivo, { titulo = 'Arquivo', pastaInfo = '', compartilhar = {}, aoExcluir = null } = {}) {
+  arquivoPronto = { arquivo, compartilhar, aoExcluir };
+  const pode = !MODO_ARTEFATO && !!(navigator.canShare && navigator.canShare({ files: [arquivo] }));
+  $('dlgRelTitulo').textContent = titulo;
+  $('dlgRelNome').textContent = `${arquivo.name} (${mb(arquivo.size)})`;
+  $('dlgRelPasta').textContent = pastaInfo;
+  $('dlgRelPasta').hidden = !pastaInfo;
+  $('btnCompartilhar').hidden = !pode;
+  $('semCompartilhar').hidden = pode;
+  $('btnExcluirArq').hidden = !aoExcluir;
+  $('dlgRelatorio').showModal();
+}
+
+$('btnCompartilhar').addEventListener('click', async () => {
+  const { arquivo, compartilhar } = arquivoPronto;
+  try {
+    await navigator.share({ files: [arquivo], title: compartilhar.title || arquivo.name, ...(compartilhar.text ? { text: compartilhar.text } : {}) });
+    $('dlgRelatorio').close();
+  } catch (e) {
+    if (e.name !== 'AbortError') avisar('Não foi possível compartilhar: ' + e.message, 6000);
+  }
+});
+$('btnSalvarRel').addEventListener('click', async () => {
+  $('dlgRelatorio').close();
+  if (await baixar(arquivoPronto.arquivo, arquivoPronto.arquivo.name)) avisar('Arquivo salvo. Veja na pasta Downloads.');
+});
+$('btnExcluirArq').addEventListener('click', async () => {
+  $('dlgRelatorio').close();
+  if (!await confirmar(`Excluir ${arquivoPronto.arquivo.name}?`)) return;
+  await arquivoPronto.aoExcluir();
+});
+$('btnFecharRel').addEventListener('click', () => $('dlgRelatorio').close());
+
+$('btnDocx').addEventListener('click', () => gerar('docx'));
+$('btnPdf').addEventListener('click', () => gerar('pdf'));
+
+/* ------------------------------ formulário do registro ------------------------------ */
+
+$('fTipo').append(new Option('Selecione…', ''), ...TIPOS.map(t => new Option(t, t)));
+
+function definirFoto(foto) {
+  estado.foto = foto;
+  const img = $('fPreview');
+  if (img.src) URL.revokeObjectURL(img.src);
+  if (foto) { img.src = URL.createObjectURL(foto.blob); img.hidden = false; }
+  else { img.removeAttribute('src'); img.hidden = true; }
+}
+
+async function telaRegistro(id) {
+  const reg = id ? await DB.obter('registros', id) : null;
+  estado.registro = reg;
+  mostrar('telaRegistro', reg ? 'Editar registro' : 'Novo registro');
+  $('erroForm').hidden = true;
+  $('fAlim').value = reg ? alimDe(reg) : estado.inspecao.alimentador;
+  const usados = new Set([estado.inspecao.alimentador, ...(await DB.registrosDe(estado.inspecao.id)).map(alimDe)]);
+  $('listaAlims').replaceChildren(...[...usados].map(a => new Option(a)));
+  $('fTipo').value = reg ? reg.tipo : '';
+  $('fDesc').value = reg ? reg.descricao : '';
+  $('fData').value = fmt(reg ? reg.dataHora : Date.now());
+  $('fLat').value = reg ? reg.lat.toFixed(6) : '';
+  $('fLon').value = reg ? reg.lon.toFixed(6) : '';
+  $('btnExcluirReg').hidden = !reg;
+  definirFoto(reg ? { blob: reg.foto, largura: reg.fotoLargura, altura: reg.fotoAltura } : null);
+  estado.coordsManual = !!reg;
+  $('gpsInfo').textContent = reg && reg.precisao ? `Precisão do GPS no registro: ±${Math.round(reg.precisao)} m` : '';
+  $('gpsInfo').className = 'dica';
+  mostrarNoMiniMapa(reg ? reg.lat : null, reg ? reg.lon : null, reg ? reg.precisao : null);
+  if (MODO_ARTEFATO) $('gpsInfo').textContent = reg ? $('gpsInfo').textContent : 'Versão de teste: digite as coordenadas (GPS e mapa só no app instalado).';
+  else if (!reg) iniciarGps();
+}
+
+$('btnAgora').addEventListener('click', () => { $('fData').value = fmt(Date.now()); });
+
+// GPS: acompanha a posição e fica com a leitura mais precisa, até chegar abaixo de PRECISAO_META.
+const PRECISAO_META = 5; // metros
+let melhorPrecisao = Infinity;
+const metros = m => (m < 10 ? m.toFixed(1).replace('.', ',') : String(Math.round(m)));
+const buscandoGps = () => estado.gpsWatch !== null && !estado.coordsManual;
+function iniciarGps() {
+  pararGps();
+  if (!('geolocation' in navigator)) { $('gpsInfo').textContent = 'Este aparelho não oferece GPS ao navegador.'; return; }
+  melhorPrecisao = Infinity;
+  estado.coordsManual = false;
+  $('gpsInfo').textContent = 'Buscando posição pelo GPS…';
+  $('gpsInfo').className = 'dica';
+  estado.gpsWatch = navigator.geolocation.watchPosition(pos => {
+    if (estado.coordsManual) return;
+    const { latitude, longitude, accuracy } = pos.coords;
+    if (accuracy <= melhorPrecisao) {
+      melhorPrecisao = accuracy;
+      $('fLat').value = latitude.toFixed(6);
+      $('fLon').value = longitude.toFixed(6);
+      mostrarNoMiniMapa(latitude, longitude, accuracy);
+    }
+    if (melhorPrecisao < PRECISAO_META) {
+      pararGps();
+      $('gpsInfo').textContent = `GPS: precisão de ±${metros(melhorPrecisao)} m (meta de ${PRECISAO_META} m atingida).`;
+      $('gpsInfo').className = 'dica ok';
+    } else {
+      $('gpsInfo').textContent = `Melhorando a precisão do GPS: ±${metros(melhorPrecisao)} m (meta: menos de ${PRECISAO_META} m). Fique parado, de preferência a céu aberto.`;
+      $('gpsInfo').className = 'dica busca';
+    }
+  }, err => {
+    if (err.code === 3 && Number.isFinite(melhorPrecisao)) return; // continua buscando com a melhor leitura até agora
+    const msg = { 1: 'Permissão de localização negada. Libere nas configurações do navegador ou use o mapa.',
+      2: 'Posição indisponível. Vá para céu aberto ou escolha no mapa.', 3: 'O GPS demorou a responder. Tente de novo ou use o mapa.' };
+    $('gpsInfo').textContent = msg[err.code] || err.message;
+    $('gpsInfo').className = 'dica';
+  }, { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 });
+}
+function pararGps() {
+  if (estado.gpsWatch !== null) navigator.geolocation.clearWatch(estado.gpsWatch);
+  estado.gpsWatch = null;
+}
+$('btnGps').addEventListener('click', iniciarGps);
+['fLat', 'fLon'].forEach(c => $(c).addEventListener('input', () => {
+  estado.coordsManual = true;
+  pararGps();
+  mostrarNoMiniMapa(numero($('fLat').value), numero($('fLon').value), null);
+  $('gpsInfo').textContent = 'Coordenadas digitadas manualmente.';
+  $('gpsInfo').className = 'dica';
+}));
+
+for (const campo of ['fCamera', 'fGaleria']) {
+  $(campo).addEventListener('change', async e => {
+    const arq = e.target.files[0];
+    e.target.value = '';
+    if (!arq) return;
+    const salvar = document.querySelector('#formRegistro button[type=submit]');
+    salvar.disabled = true; salvar.textContent = 'Processando foto…';
+    try { definirFoto(await comprimirFoto(arq)); }
+    catch (err) { console.error(err); avisar('Não foi possível ler esta imagem.'); }
+    finally { salvar.disabled = false; salvar.textContent = 'Salvar registro'; }
+  });
+}
+
+$('formRegistro').addEventListener('submit', async e => {
+  e.preventDefault();
+  const erros = [];
+  const alimentador = $('fAlim').value.trim();
+  const tipo = $('fTipo').value;
+  const dataHora = lerDataHora($('fData').value);
+  const lat = numero($('fLat').value), lon = numero($('fLon').value);
+  if (!alimentador) erros.push('informe o alimentador');
+  if (!tipo) erros.push('escolha o tipo de irregularidade');
+  if (dataHora === null) erros.push('informe a data/hora no formato dd/mm/aaaa hh:mm:ss');
+  if (lat === null || lat < -90 || lat > 90 || lon === null || lon < -180 || lon > 180) erros.push('informe a localização (latitude e longitude válidas)');
+  if (!estado.foto) erros.push('adicione a foto');
+  if (erros.length) {
+    $('erroForm').textContent = 'Falta: ' + erros.join('; ') + '.';
+    $('erroForm').hidden = false;
+    $('erroForm').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  if (estado.salvando) return;
+  if (buscandoGps() && melhorPrecisao >= PRECISAO_META &&
+      !await confirmar(`O GPS ainda está com precisão de ±${metros(melhorPrecisao)} m (meta: menos de ${PRECISAO_META} m). Salvar assim mesmo?`, 'Salvar assim')) return;
+  estado.salvando = true;
+  const antigo = estado.registro;
+  const reg = {
+    id: antigo ? antigo.id : novoId(),
+    inspecaoId: estado.inspecao.id,
+    alimentador,
+    tipo,
+    descricao: $('fDesc').value.trim(),
+    dataHora, lat, lon,
+    precisao: estado.coordsManual ? (antigo ? antigo.precisao : null) : (Number.isFinite(melhorPrecisao) ? melhorPrecisao : null),
+    foto: estado.foto.blob,
+    fotoLargura: estado.foto.largura,
+    fotoAltura: estado.foto.altura,
+    versao: Date.now(),
+  };
+  try {
+    await DB.salvar('registros', reg);
+    sincronizar(reg.inspecaoId);
+    avisar(antigo ? 'Registro atualizado.' : 'Registro salvo.');
+    history.back();
+  } catch (err) {
+    console.error(err);
+    avisar('Não foi possível salvar (memória do aparelho cheia?).', 6000);
+  } finally {
+    estado.salvando = false;
+  }
+});
+
+$('btnExcluirReg').addEventListener('click', async () => {
+  if (!await confirmar('Excluir este registro?')) return;
+  await DB.excluir('registros', estado.registro.id);
+  sincronizar(estado.registro.inspecaoId);
+  history.back();
+});
+
+/* ------------------------------ mapa ------------------------------ */
+
+function camadasBase(m) {
+  const ruas = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© OpenStreetMap',
+  });
+  const satelite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19, attribution: 'Imagens © Esri',
+  });
+  ruas.addTo(m);
+  return L.control.layers({ 'Ruas': ruas, 'Satélite': satelite }).addTo(m);
+}
+
+// Põe no mapa "m" a rede do alimentador aberto (estado.rede), trocando a anterior. "alvo" guarda o que
+// está desenhado; com "controle", cada camada vira uma opção que liga/desliga no botão de camadas.
+function aplicarRede(alvo, m, opcoes, controle) {
+  if (alvo.d === estado.rede) return;
+  alvo.itens.forEach(c => { if (controle) controle.removeLayer(c.camada); c.camada.remove(); });
+  alvo.d = estado.rede;
+  alvo.itens = estado.rede ? Rede.camadas(m, estado.rede, opcoes) : [];
+  for (const c of alvo.itens) {
+    if (controle) controle.addOverlay(c.camada, c.rotulo);
+    if (c.visivel || !controle) c.camada.addTo(m);
+  }
+}
+
+// Mini-mapa do formulário: mostra o ponto do registro e o círculo de precisão do GPS.
+let miniMapa, miniMarcador, miniCirculo;
+const miniRede = { d: null, itens: [] };
+function mostrarNoMiniMapa(lat, lon, precisao) {
+  const el = $('miniMapa');
+  const ok = !MODO_ARTEFATO && window.L && lat !== null && lon !== null;
+  el.hidden = $('miniMapaDica').hidden = !ok;
+  if (!ok) return;
+  const ll = L.latLng(lat, lon);
+  if (!miniMapa) {
+    miniMapa = L.map(el, { zoomControl: false, preferCanvas: true });
+    camadasBase(miniMapa);
+    miniMarcador = L.marker(ll).addTo(miniMapa);
+    miniCirculo = L.circle(ll, { radius: 1, color: '#ea7501', weight: 1, fillOpacity: 0.15 }).addTo(miniMapa);
+    miniMapa.on('click', () => $('btnMapa').click());
+    miniMapa.setView(ll, 18);
+  }
+  aplicarRede(miniRede, miniMapa, { interativo: false, so: ['rede3', 'rede1', 'sub'] });
+  miniMapa.invalidateSize();
+  miniMarcador.setLatLng(ll);
+  miniCirculo.setLatLng(ll).setRadius(precisao > 0 ? precisao : 0);
+  if (miniMapa.getZoom() < 16) miniMapa.setView(ll, 18); else miniMapa.panTo(ll);
+}
+
+let mapa, marcador, camadaPontos, pontoEscolhido, controleMapa;
+const redeMapa = { d: null, itens: [] };
+let escolhendoPonto = false;
+function prepararMapa() {
+  if (!mapa) {
+    mapa = L.map('mapa', { zoomControl: true, preferCanvas: true });
+    controleMapa = camadasBase(mapa);
+    camadaPontos = L.layerGroup().addTo(mapa);
+    mapa.on('click', e => { if (escolhendoPonto && marcador) { marcador.setLatLng(e.latlng); atualizarPonto(e.latlng); } });
+    // lembra quais equipamentos a pessoa quer ver
+    const lembrar = visivel => e => {
+      const c = redeMapa.itens.find(x => x.camada === e.layer);
+      if (c) Rede.lembrar(c.chave, visivel);
+    };
+    mapa.on('overlayadd', lembrar(true));
+    mapa.on('overlayremove', lembrar(false));
+  }
+  aplicarRede(redeMapa, mapa, { aoTocar: mostrarEquipamento }, controleMapa);
+}
+
+// Janela de um equipamento tocado no mapa. Ao escolher o ponto de um registro, dá para usar a posição
+// do equipamento e citá-lo na descrição.
+function mostrarEquipamento(it) {
+  const div = document.createElement('div');
+  div.className = 'equip';
+  const h = document.createElement('h4');
+  h.textContent = it.titulo;
+  const tab = document.createElement('table');
+  for (const [rot, val] of it.linhas) {
+    if (!val) continue;
+    const tr = tab.insertRow();
+    tr.insertCell().textContent = rot;
+    tr.insertCell().textContent = val;
+  }
+  div.append(h, tab);
+  if (escolhendoPonto) {
+    const usar = document.createElement('button');
+    usar.className = 'btn primario';
+    usar.textContent = 'Usar a posição deste equipamento';
+    usar.addEventListener('click', () => {
+      marcador.setLatLng(it.ll);
+      atualizarPonto(it.ll);
+      mapa.closePopup();
+    });
+    const citar = document.createElement('button');
+    citar.className = 'btn';
+    citar.textContent = 'Usar a posição e citar na descrição';
+    citar.addEventListener('click', () => {
+      usar.click();
+      const cod = (it.linhas.find(l => l[0] === 'Código') || [])[1];
+      const ref = `${it.titulo}${cod ? ' ' + cod : ''}`;
+      const desc = $('fDesc');
+      if (!desc.value.includes(ref)) desc.value = desc.value.trim() ? `${desc.value.trim()} (${ref})` : ref;
+    });
+    div.append(usar, citar);
+  }
+  L.popup({ maxWidth: 260 }).setLatLng(it.ll).setContent(div).openOn(mapa);
+}
+
+function atualizarPonto(ll) {
+  pontoEscolhido = ll;
+  $('mapaCoords').textContent = `${ll.lat.toFixed(6)}, ${ll.lng.toFixed(6)}`;
+}
+
+function abrirMapa() {
+  $('modalMapa').hidden = false;
+  prepararMapa();
+  mapa.invalidateSize();
+  if (!navigator.onLine) $('mapaAviso').textContent += ' Sem internet: só aparecem as áreas do mapa já vistas antes.';
+}
+
+$('btnMapa').addEventListener('click', () => {
+  escolhendoPonto = true;
+  abrirMapa();
+  camadaPontos.clearLayers();
+  $('mapaAviso').textContent = estado.rede ? 'Toque no mapa, arraste o marcador ou toque num equipamento.' : 'Toque no mapa ou arraste o marcador.';
+  $('btnConfirmarMapa').hidden = false;
+  const lat = numero($('fLat').value), lon = numero($('fLon').value);
+  const temPonto = lat !== null && lon !== null;
+  const inicio = temPonto ? L.latLng(lat, lon) : estado.rede ? Rede.limites(estado.rede).getCenter() : L.latLng(-23.5505, -46.6333);
+  if (!marcador) marcador = L.marker(inicio, { draggable: true, zIndexOffset: 1000 }).on('drag', e => atualizarPonto(e.target.getLatLng()));
+  marcador.setLatLng(inicio).addTo(mapa);
+  if (temPonto) mapa.setView(inicio, 18);
+  else if (estado.rede) mapa.fitBounds(Rede.limites(estado.rede), { padding: [20, 20] });
+  else mapa.setView(inicio, 12);
+  atualizarPonto(inicio);
+});
+
+$('btnConfirmarMapa').addEventListener('click', () => {
+  pararGps();
+  estado.coordsManual = true;
+  $('fLat').value = pontoEscolhido.lat.toFixed(6);
+  $('fLon').value = pontoEscolhido.lng.toFixed(6);
+  $('gpsInfo').textContent = 'Localização escolhida no mapa.';
+  $('gpsInfo').className = 'dica';
+  $('modalMapa').hidden = true;
+  mapa.closePopup();
+  mostrarNoMiniMapa(pontoEscolhido.lat, pontoEscolhido.lng, null);
+});
+
+$('btnMapaInsp').addEventListener('click', async () => {
+  const regs = await registrosOrdenados(estado.inspecao.id);
+  escolhendoPonto = false;
+  abrirMapa();
+  if (marcador) marcador.remove();
+  camadaPontos.clearLayers();
+  $('btnConfirmarMapa').hidden = true;
+  $('mapaAviso').textContent = `Alim. ${estado.inspecao.alimentador}: ${regs.length} ${regs.length === 1 ? 'registro' : 'registros'}.` +
+    (estado.rede ? ' Use o botão de camadas para escolher os equipamentos.' : '');
+  $('mapaCoords').textContent = '';
+  const pts = regs.map((r, i) => {
+    const popup = document.createElement('div');
+    popup.innerHTML = `<b>Foto ${i + 1}</b><br>`;
+    popup.append(`Alim. ${alimDe(r)}`, document.createElement('br'), r.tipo, document.createElement('br'), fmt(r.dataHora));
+    camadaPontos.addLayer(L.marker([r.lat, r.lon]).bindPopup(popup));
+    return [r.lat, r.lon];
+  });
+  if (regs.length > 1) L.polyline(pts, { color: '#ea7501', weight: 3, dashArray: '4 4', interactive: false }).addTo(camadaPontos);
+  if (pts.length) mapa.fitBounds(pts, { padding: [40, 40], maxZoom: 18 });
+  else mapa.fitBounds(Rede.limites(estado.rede), { padding: [20, 20] });
+});
+
+$('btnFecharMapa').addEventListener('click', () => { $('modalMapa').hidden = true; mapa.closePopup(); });
+
+/* ------------------------------ pastas do app ------------------------------ */
+
+// Mantém, para cada inspeção, Fotos/<pasta>/Foto_NN_<tipo>.jpg e Registros/<pasta>.csv
+// iguais aos dados do app. Só regrava as fotos que mudaram (manifesto guardado na inspeção).
+let filaPastas = Promise.resolve();
+function sincronizar(inspecaoId, refazer = false) {
+  if (!Pastas.suportado) return filaPastas;
+  filaPastas = filaPastas.then(() => sincronizarAgora(inspecaoId, refazer)).catch(e => console.error('pastas', e));
+  return filaPastas;
+}
+
+const nomeFoto = (r, n) => `Foto_${String(n).padStart(2, '0')}_${Pastas.seguro(r.tipo).slice(0, 50)}.jpg`;
+
+function tabelaCsv(regs, insp) {
+  const cel = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  const cab = ['Nº', 'Alimentador', 'Tipo de irregularidade', 'Descrição', 'Data/hora', 'Latitude', 'Longitude', 'Precisão GPS (m)', 'Arquivo da foto'];
+  const linhas = regs.map((r, i) => [i + 1, r.alimentador || insp.alimentador, r.tipo, r.descricao, fmt(r.dataHora),
+    r.lat.toFixed(6).replace('.', ','), r.lon.toFixed(6).replace('.', ','), r.precisao ? Math.round(r.precisao) : '', nomeFoto(r, i + 1)]);
+  // ";" e BOM para o Excel em português abrir com acentos e colunas certas.
+  return new Blob(['\ufeff' + [cab, ...linhas].map(l => l.map(cel).join(';')).join('\r\n')], { type: 'text/csv' });
+}
+
+async function sincronizarAgora(id, refazer) {
+  const insp = await DB.obter('inspecoes', id);
+  if (!insp) return;
+  const regs = await registrosOrdenados(id);
+  const pasta = Pastas.nomePasta(insp);
+  const ant = (!refazer && insp.arquivos) || { pasta, fotos: {} };
+  if (ant.pasta !== pasta) {
+    await Pastas.remover(`${Pastas.FOTOS}/${ant.pasta}`);
+    await Pastas.remover(`${Pastas.REGISTROS}/${ant.pasta}.csv`);
+    ant.fotos = {};
+  }
+  const desejado = {};
+  regs.forEach((r, i) => { desejado[nomeFoto(r, i + 1)] = `${r.id}:${r.versao || 0}`; });
+  for (const item of await Pastas.listar(`${Pastas.FOTOS}/${pasta}`))
+    if (!(item.nome in desejado)) await Pastas.remover(`${Pastas.FOTOS}/${pasta}/${item.nome}`);
+  for (const [i, r] of regs.entries()) {
+    const nome = nomeFoto(r, i + 1);
+    if (ant.fotos[nome] !== desejado[nome]) await Pastas.gravar(`${Pastas.FOTOS}/${pasta}/${nome}`, r.foto);
+  }
+  await Pastas.gravar(`${Pastas.REGISTROS}/${pasta}.csv`, tabelaCsv(regs, insp));
+  const atual = await DB.obter('inspecoes', id);
+  if (atual) await DB.salvar('inspecoes', { ...atual, arquivos: { pasta, fotos: desejado } });
+}
+
+async function removerPastasDe(insp) {
+  if (!Pastas.suportado) return;
+  await filaPastas;
+  const pasta = (insp.arquivos && insp.arquivos.pasta) || Pastas.nomePasta(insp);
+  await Pastas.remover(`${Pastas.FOTOS}/${pasta}`);
+  await Pastas.remover(`${Pastas.REGISTROS}/${pasta}.csv`);
+}
+
+const dataCurta = ms => fmt(ms).slice(0, 16);
+
+function itemArquivo(icone, nome, detalhe, aoTocar) {
+  const li = document.createElement('li');
+  li.innerHTML = `<span class="icone-arq"></span><div class="info"><strong></strong><small></small></div><span>&#8250;</span>`;
+  li.querySelector('.icone-arq').textContent = icone;
+  li.querySelector('strong').textContent = nome;
+  li.querySelector('small').textContent = detalhe;
+  li.addEventListener('click', aoTocar);
+  return li;
+}
+
+function listaVazia(ul, texto) {
+  const li = document.createElement('li');
+  li.className = 'vazio'; li.textContent = texto;
+  ul.appendChild(li);
+}
+
+async function telaArquivos() {
+  mostrar('telaArquivos', 'Pastas do app');
+  $('semPastas').hidden = Pastas.suportado;
+  $('btnZipTudo').disabled = !Pastas.suportado;
+  ['listaRelatorios', 'listaTabelas', 'listaFotos'].forEach(l => { $(l).innerHTML = ''; });
+  if (!Pastas.suportado) return;
+  await filaPastas;
+  if (navigator.storage.estimate) {
+    const { usage, quota } = await navigator.storage.estimate();
+    $('usoEspaco').textContent = `Espaço usado pelo app: ${mb(usage)} de ${mb(quota)} disponíveis.`;
+  }
+
+  const rel = await Pastas.listar(Pastas.RELATORIOS);
+  if (!rel.length) listaVazia($('listaRelatorios'), 'Nenhum relatório gerado ainda.');
+  for (const f of rel) {
+    const caminho = `${Pastas.RELATORIOS}/${f.nome}`;
+    $('listaRelatorios').appendChild(itemArquivo(f.nome.endsWith('.pdf') ? '📕' : '📘', f.nome, `${dataCurta(f.modificado)} · ${mb(f.tamanho)}`,
+      async () => oferecerArquivo(await Pastas.ler(caminho), {
+        titulo: 'Relatório', pastaInfo: 'Pasta Relatórios do app.',
+        aoExcluir: async () => { await Pastas.remover(caminho); telaArquivos(); },
+      })));
+  }
+
+  const tabs = await Pastas.listar(Pastas.REGISTROS);
+  if (!tabs.length) listaVazia($('listaTabelas'), 'Nenhuma inspeção com registros.');
+  for (const f of tabs) {
+    const caminho = `${Pastas.REGISTROS}/${f.nome}`;
+    $('listaTabelas').appendChild(itemArquivo('📊', f.nome, `${dataCurta(f.modificado)} · abre no Excel`,
+      async () => oferecerArquivo(await Pastas.ler(caminho), { titulo: 'Tabela de registros', pastaInfo: 'Pasta Registros do app. Atualizada a cada registro salvo.' })));
+  }
+
+  const fotos = (await Pastas.listar(Pastas.FOTOS)).filter(f => f.pasta);
+  if (!fotos.length) listaVazia($('listaFotos'), 'Nenhuma foto ainda.');
+  for (const d of fotos) {
+    $('listaFotos').appendChild(itemArquivo('📁', d.nome, `${d.itens} ${d.itens === 1 ? 'foto' : 'fotos'} · ${mb(d.tamanho)}`, async () => {
+      avisar('Preparando as fotos…', 2000);
+      const zip = await Pastas.zip(`${Pastas.FOTOS}/${d.nome}`);
+      oferecerArquivo(new File([zip], `Fotos_${d.nome}.zip`, { type: 'application/zip' }), { titulo: 'Fotos da inspeção', pastaInfo: `Pasta Fotos/${d.nome} do app, compactada.` });
+    }));
+  }
+}
+
+$('btnArquivos').addEventListener('click', () => { ir('telaArquivos'); telaArquivos(); });
+$('btnZipTudo').addEventListener('click', async () => {
+  const b = $('btnZipTudo');
+  b.disabled = true; b.textContent = 'Compactando…';
+  try {
+    await filaPastas;
+    const d = new Date();
+    const nome = `Inspecao_Redes_${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.zip`;
+    oferecerArquivo(new File([await Pastas.zip()], nome, { type: 'application/zip' }),
+      { titulo: 'Pastas do app', pastaInfo: 'Contém as pastas Relatorios, Registros e Fotos.' });
+  } catch (e) {
+    avisar('Não foi possível compactar: ' + e.message, 6000);
+  } finally {
+    b.disabled = false; b.textContent = 'Exportar tudo (.zip)';
+  }
+});
+
+/* ------------------------------ backup ------------------------------ */
+
+const blobParaDataUrl = b => new Promise(ok => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.readAsDataURL(b); });
+
+$('btnExportar').addEventListener('click', async () => {
+  const inspecoes = await DB.todos('inspecoes');
+  const registros = [];
+  for (const r of await DB.todos('registros')) registros.push({ ...r, foto: await blobParaDataUrl(r.foto) });
+  const d = new Date();
+  const nome = `backup_inspecoes_${d.toISOString().slice(0, 10)}.json`;
+  baixar(new Blob([JSON.stringify({ app: 'inspecao-redes', versao: 2, inspecoes, registros })], { type: 'application/json' }), nome);
+});
+
+$('inpImportar').addEventListener('change', async e => {
+  const arq = e.target.files[0];
+  e.target.value = '';
+  if (!arq) return;
+  try {
+    const dados = JSON.parse(await arq.text());
+    if (dados.app !== 'inspecao-redes') throw new Error('arquivo não é um backup deste aplicativo');
+    for (const i of dados.inspecoes) await DB.salvar('inspecoes', i);
+    const dataUrlParaBlob = url => {
+      const [cab, b64] = url.split(',');
+      const bin = atob(b64), bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new Blob([bytes], { type: cab.slice(5).split(';')[0] });
+    };
+    for (const r of dados.registros) await DB.salvar('registros', { ...r, foto: dataUrlParaBlob(r.foto) });
+    for (const i of dados.inspecoes) sincronizar(i.id, true);
+    avisar(`Backup importado: ${dados.inspecoes.length} inspeções, ${dados.registros.length} registros.`);
+    telaInicio();
+  } catch (err) {
+    avisar('Falha ao importar: ' + err.message, 6000);
+  }
+});
+
+/* ------------------------------ inspeções da versão 1.0 ------------------------------ */
+
+async function verificarV1() {
+  try {
+    const v1 = await DB.dadosV1();
+    const atuais = new Set((await DB.todos('inspecoes')).map(i => i.id));
+    const novas = v1 ? v1.inspecoes.filter(i => !atuais.has(i.id)) : [];
+    $('blocoV1').hidden = !novas.length;
+    return v1;
+  } catch (e) {
+    console.error(e);
+    return null;
+  }
+}
+
+$('btnCopiarV1').addEventListener('click', async () => {
+  const v1 = await verificarV1();
+  if (!v1) return;
+  const atuais = new Set((await DB.todos('inspecoes')).map(i => i.id));
+  const novas = v1.inspecoes.filter(i => !atuais.has(i.id));
+  const ids = new Set(novas.map(i => i.id));
+  const regs = v1.registros.filter(r => ids.has(r.inspecaoId));
+  for (const i of novas) await DB.salvar('inspecoes', { ...i, arquivos: undefined });
+  for (const r of regs) await DB.salvar('registros', r);
+  for (const i of novas) sincronizar(i.id, true);
+  avisar(`Copiadas ${novas.length} ${novas.length === 1 ? 'inspeção' : 'inspeções'} com ${regs.length} ${regs.length === 1 ? 'registro' : 'registros'}. Para ver a rede no mapa, use “Alterar” e escolha a distribuidora e o alimentador.`, 8000);
+  $('blocoV1').hidden = true;
+  telaInicio();
+});
+
+/* ------------------------------ início ------------------------------ */
+
+function statusRede() {
+  const el = $('statusRede');
+  el.textContent = navigator.onLine ? 'online' : 'offline';
+  el.classList.toggle('off', !navigator.onLine);
+}
+addEventListener('online', statusRede);
+addEventListener('offline', statusRede);
+statusRede();
+
+if (MODO_ARTEFATO) {
+  // Sem GPS nem mapa nesta versão: coordenadas digitadas.
+  ['btnGps', 'btnMapa', 'btnMapaInsp'].forEach(b => { $(b).hidden = true; });
+  $('avisoTeste').hidden = false;
+} else if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(console.error);
+}
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+
+history.replaceState({ tela: 'telaInicio' }, '');
+telaInicio();
+verificarV1();
+DB.todos('inspecoes').then(insps => insps.filter(i => !i.arquivos).forEach(i => sincronizar(i.id)));

@@ -1,0 +1,156 @@
+/* Paleta ARSESP: laranja da Energia Elétrica (#EA7501), azul institucional e grafite.
+   Texto pequeno sobre laranja usa o tom escuro para manter contraste. */
+:root {
+  --laranja: #ea7501;
+  --laranja-escuro: #b35500;
+  --laranja-claro: #fdeedd;
+  --azul-arsesp: #0062ab;
+  --texto: #3e3d3d;
+  --suave: #6b6a6a;
+  --borda: #e3d6c8;
+  --fundo: #faf7f3;
+  --cartao: #ffffff;
+  --perigo: #b3261e;
+  --ok: #1e7b3a;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--texto);
+  background: var(--fundo);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+[hidden] { display: none !important; }
+
+.topo {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--laranja); color: #fff;
+  border-bottom: 3px solid var(--laranja-escuro);
+  padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+}
+.topo h1 { font-size: 18px; font-weight: 700; margin: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.icone { background: none; border: 0; color: #fff; font-size: 24px; padding: 0 8px 0 0; cursor: pointer; }
+.status { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: rgba(0,0,0,.18); }
+.status.off { background: #fff; color: var(--laranja-escuro); }
+
+main { max-width: 720px; margin: 0 auto; padding: 16px; }
+h2 { font-size: 15px; color: var(--suave); text-transform: uppercase; letter-spacing: .04em; margin: 24px 0 8px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 8px 14px;
+  border: 1px solid var(--borda); border-radius: 8px;
+  background: var(--cartao); color: var(--azul-arsesp);
+  font: inherit; font-weight: 600; cursor: pointer; text-align: center;
+}
+.btn:active { filter: brightness(.95); }
+.btn.primario { background: var(--laranja-escuro); border-color: var(--laranja-escuro); color: #fff; }
+.btn.perigo { color: var(--perigo); border-color: #e7b9b6; margin-top: 24px; width: 100%; }
+.btn.grande { width: 100%; min-height: 52px; font-size: 17px; }
+.btn.pequeno { min-height: 36px; padding: 4px 12px; font-size: 14px; }
+.btn[disabled] { opacity: .5; }
+
+.linha { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.linha > * { flex: 1 1 0; min-width: 0; }
+.linha.fim { justify-content: flex-end; }
+.linha.fim > * { flex: 0 0 auto; }
+
+.lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.lista li {
+  background: var(--cartao); border: 1px solid var(--borda); border-radius: 10px;
+  padding: 12px; display: flex; gap: 12px; align-items: center; cursor: pointer;
+}
+.lista li .info { flex: 1; min-width: 0; }
+.lista li strong { display: block; }
+.lista li small { color: var(--suave); display: block; overflow: hidden; text-overflow: ellipsis; }
+.registros img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; background: var(--laranja-claro); flex: none; }
+.num { font-weight: 700; color: var(--laranja-escuro); min-width: 28px; }
+.vazio { color: var(--suave); text-align: center; padding: 24px 8px; }
+
+.cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+.alim { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-left: 4px solid var(--laranja); }
+.alim small { color: var(--suave); display: block; }
+.alim strong { font-size: 20px; }
+
+.campo { margin-bottom: 18px; }
+.campo > label { display: block; font-weight: 600; margin-bottom: 6px; }
+input[type=text], select, textarea, dialog input {
+  width: 100%; font: inherit; padding: 10px 12px; min-height: 44px;
+  border: 1px solid var(--borda); border-radius: 8px; background: #fff; color: var(--texto);
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--laranja); outline-offset: 0; border-color: var(--laranja); }
+textarea { resize: vertical; }
+.coords input { flex: 1 1 140px; }
+#fData { flex: 3 1 0; }
+.dica { color: var(--suave); display: block; margin-top: 4px; }
+.dica.ok { color: var(--ok); }
+.dica.busca { color: var(--laranja-escuro); font-weight: 600; }
+.mini-mapa { height: 220px; margin-top: 8px; border: 1px solid var(--borda); border-radius: 8px; overflow: hidden; }
+.preview { display: block; width: 100%; max-height: 360px; object-fit: contain; margin-top: 10px; border-radius: 8px; background: #000; }
+.erro { color: var(--perigo); font-weight: 600; }
+
+.backup { margin-top: 32px; color: var(--suave); }
+.backup summary { cursor: pointer; font-weight: 600; }
+
+.modal { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 1000; background: #fff; display: flex; flex-direction: column; }
+.modal-topo, .modal-rodape { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--laranja-escuro); color: #fff; }
+.modal-topo { padding-top: calc(10px + env(safe-area-inset-top)); }
+.modal-rodape { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+.modal-topo span, .modal-rodape span { flex: 1; font-size: 14px; }
+#mapa { flex: 1; }
+
+dialog { border: 0; border-radius: 12px; padding: 20px; width: calc(100vw - 32px); max-width: 420px; }
+dialog::backdrop { background: rgba(0,0,0,.45); }
+/* navegadores sem espaçamento em flex (Chrome < 84; classe posta por js/dialogo.js) */
+.sem-gap .linha { margin-left: -4px; margin-right: -4px; }
+.sem-gap .linha > * { margin: 4px; }
+.sem-gap .topo > * + *, .sem-gap .alim > * + *, .sem-gap .lista > li > * + *,
+.sem-gap .modal-topo > * + *, .sem-gap .modal-rodape > * + * { margin-left: 10px; }
+/* navegadores sem <dialog> (js/dialogo.js) */
+.sem-dialog dialog { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1501;
+  max-height: calc(100vh - 32px); overflow: auto; background: #fff; color: var(--texto); box-shadow: 0 8px 32px rgba(0,0,0,.3); }
+.sem-dialog dialog[open] { display: block; }
+.dialog-fundo { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 1500; background: rgba(0,0,0,.45); }
+dialog h3 { margin: 0 0 12px; }
+dialog label { display: block; font-weight: 600; margin-bottom: 6px; }
+
+.aviso {
+  position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 2000;
+  max-width: 480px; margin: 0 auto; padding: 12px 16px; border-radius: 10px;
+  background: #222; color: #fff; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+}
+.nome-arquivo { color: var(--suave); font-size: 14px; word-break: break-all; margin: 0 0 12px; }
+h2 { color: var(--laranja-escuro); }
+.arquivos { margin-top: 16px; }
+.espaco-acima { margin-top: 14px; }
+.arquivos-lista li { padding: 10px 12px; }
+.arquivos-lista .icone-arq { font-size: 22px; flex: none; }
+#qualidadeAtual { margin-top: 2px; }
+.btn.perigo-cheio { background: var(--perigo); border-color: var(--perigo); color: #fff; }
+.aviso-teste { margin: 0 0 12px; font-size: 14px; border-left: 4px solid var(--azul-arsesp); }
+
+/* Versão 2.0: escolha do alimentador e rede no mapa */
+.sugestoes { list-style: none; margin: 4px 0 0; padding: 0; max-height: 38vh; overflow: auto;
+  border: 1px solid var(--borda); border-radius: 8px; }
+.sugestoes li { padding: 8px 12px; border-top: 1px solid var(--borda); cursor: pointer; }
+.sugestoes li:first-child { border-top: 0; }
+.sugestoes li.ativo, .sugestoes li:active { background: var(--laranja-claro); }
+.sugestoes strong { display: block; }
+.sugestoes small { color: var(--suave); display: block; font-size: 13px; }
+.sugestoes .vazio { padding: 10px 12px; text-align: left; cursor: default; }
+#distAtual { font-weight: 600; color: var(--azul-arsesp); margin-bottom: 2px; }
+.rede-status { margin-top: 2px; }
+.rede-status.ok { color: var(--ok); }
+.rede-status.erro { color: var(--perigo); }
+.leg { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px;
+  border: 1px solid rgba(0,0,0,.25); }
+.leg-linha { width: 16px; height: 4px; border-radius: 2px; vertical-align: 3px; border: 0; }
+.leaflet-control-layers-overlays label { margin: 4px 0; }
+.leaflet-control-layers-expanded { max-height: 60vh; overflow: auto; font-size: 14px; }
+.equip h4 { margin: 0 0 4px; font-size: 14px; }
+.equip table { border-collapse: collapse; font-size: 13px; }
+.equip td { padding: 1px 6px 1px 0; vertical-align: top; }
+.equip td:first-child { color: var(--suave); }
+.equip .btn { margin-top: 8px; width: 100%; min-height: 36px; }

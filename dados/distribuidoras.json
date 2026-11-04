@@ -1,0 +1,109 @@
+{
+ "ano": 2025,
+ "pasta": "dados/2025",
+ "fonte": "ANEEL, Base de Dados Geográfica da Distribuidora (BDGD), data-base 31/12/2025 — dadosabertos-aneel.opendata.arcgis.com",
+ "distribuidoras": [
+  {
+   "id": "cpfl-paulista",
+   "nome": "CPFL Paulista",
+   "fonte": "CPFL_Paulista_63_2025-12-31_V11_20260822-0029",
+   "alimentadores": 1774
+  },
+  {
+   "id": "cpfl-piratininga",
+   "nome": "CPFL Piratininga",
+   "fonte": "CPFL_Piratininga_2937_2025-12-31_V11_20260823-1826",
+   "alimentadores": 550
+  },
+  {
+   "id": "cpfl-santa-cruz",
+   "nome": "CPFL Santa Cruz",
+   "fonte": "CPFL_Santa_Cruz_69_2025-12-31_V11_20260824-0928",
+   "alimentadores": 221
+  },
+  {
+   "id": "edp-sp",
+   "nome": "EDP São Paulo",
+   "fonte": "EDP_SP_391_2025-12-31_V11_20260830-0340",
+   "alimentadores": 615
+  },
+  {
+   "id": "enel-sp",
+   "nome": "Enel Distribuição São Paulo",
+   "fonte": "Enel_SP_390_2025-12-31_V11_20260827-0135",
+   "alimentadores": 1857
+  },
+  {
+   "id": "energisa-sul-sudeste",
+   "nome": "Energisa Sul-Sudeste",
+   "fonte": "Energisa_Sul-Sudeste_5216_2025-12-31_V11_20260823-1743",
+   "alimentadores": 334
+  },
+  {
+   "id": "neoenergia-elektro",
+   "nome": "Neoenergia Elektro",
+   "fonte": "Neoenergia_Elektro_385_2025-12-31_V11_20260824-0929",
+   "alimentadores": 985
+  },
+  {
+   "id": "cedrap",
+   "nome": "Cedrap (cooperativa)",
+   "fonte": "Cedrap_5381_2025-12-31_V11_20260823-1900",
+   "alimentadores": 9
+  },
+  {
+   "id": "cedri",
+   "nome": "Cedri (cooperativa)",
+   "fonte": "Cedri_5366_2025-12-31_V11_20260827-0131",
+   "alimentadores": 5
+  },
+  {
+   "id": "cemirim",
+   "nome": "Cemirim (cooperativa)",
+   "fonte": "Cemirim_7467_2025-12-31_V11_20260825-0912",
+   "alimentadores": 18
+  },
+  {
+   "id": "cerim",
+   "nome": "Cerim (cooperativa)",
+   "fonte": "Cerim_5386_2025-12-31_V11_20260826-0019",
+   "alimentadores": 12
+  },
+  {
+   "id": "ceripa",
+   "nome": "Ceripa (cooperativa)",
+   "fonte": "Ceripa_5378_2025-12-31_V11_20260826-0018",
+   "alimentadores": 63
+  },
+  {
+   "id": "ceris",
+   "nome": "Ceris (cooperativa)",
+   "fonte": "Ceris_5382_2025-12-31_V11_20260826-0018",
+   "alimentadores": 15
+  },
+  {
+   "id": "cerpro",
+   "nome": "Cerpro (cooperativa)",
+   "fonte": "Cerpro_5384_2025-12-31_V11_20260827-0130",
+   "alimentadores": 8
+  },
+  {
+   "id": "cerrp",
+   "nome": "Cerrp (cooperativa)",
+   "fonte": "Cerrp_5385_2025-12-31_V11_20260826-0017",
+   "alimentadores": 9
+  },
+  {
+   "id": "cervam",
+   "nome": "Cervam (cooperativa)",
+   "fonte": "Cervam_5375_2025-12-31_V11_20260825-0912",
+   "alimentadores": 8
+  },
+  {
+   "id": "cetril",
+   "nome": "Cetril (cooperativa)",
+   "fonte": "Cetril_5379_2025-12-31_V11_20260822-0907",
+   "alimentadores": 11
+  }
+ ]
+}

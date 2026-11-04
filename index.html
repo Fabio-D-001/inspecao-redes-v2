@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ea7501">
+<title>Inspeção de Redes 2.0</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="topo">
+  <button id="btnVoltar" class="icone" aria-label="Voltar" hidden>&#8592;</button>
+  <h1 id="titulo">Inspeção de Redes 2.0</h1>
+  <span id="statusRede" class="status" title="Situação da conexão"></span>
+</header>
+
+<main>
+  <!-- Tela 1: lista de inspeções -->
+  <section id="telaInicio" class="tela">
+    <p id="avisoTeste" class="cartao aviso-teste" hidden><strong>Versão de teste.</strong> Aqui não há GPS, mapa, compartilhamento nem uso offline: digite as coordenadas e salve os arquivos com “Salvar em Downloads”. No app instalado no celular tudo isso funciona.</p>
+    <button id="btnNovaInspecao" class="btn primario grande">+ Nova inspeção</button>
+    <h2>Inspeções</h2>
+    <ul id="listaInspecoes" class="lista"></ul>
+    <p id="semInspecoes" class="vazio" hidden>Nenhuma inspeção ainda. Toque em “Nova inspeção” e escolha a distribuidora e o alimentador.</p>
+    <button id="btnArquivos" class="btn grande arquivos">Pastas do app (relatórios, registros, fotos)</button>
+    <details class="backup">
+      <summary>Backup dos dados</summary>
+      <p>Salve uma cópia de todas as inspeções (com fotos) num arquivo, para guardar ou passar para outro aparelho.</p>
+      <div class="linha">
+        <button id="btnExportar" class="btn">Exportar backup</button>
+        <label class="btn">Importar backup<input id="inpImportar" type="file" accept=".json,application/json" hidden></label>
+      </div>
+      <div id="blocoV1" hidden>
+        <p>Há inspeções da versão 1.0 neste aparelho. Copie-as para cá; a versão 1.0 continua com as dela.</p>
+        <button id="btnCopiarV1" class="btn">Copiar inspeções da versão 1.0</button>
+      </div>
+    </details>
+  </section>
+
+  <!-- Tela 2: inspeção (registros de um alimentador) -->
+  <section id="telaInspecao" class="tela" hidden>
+    <div class="cartao alim">
+      <div>
+        <small id="distAtual"></small>
+        <small>Alimentador</small>
+        <strong id="alimAtual"></strong>
+        <small id="qualidadeAtual"></small>
+        <small id="redeStatus" class="rede-status"></small>
+      </div>
+      <button id="btnEditarAlim" class="btn pequeno">Alterar</button>
+    </div>
+    <button id="btnNovoRegistro" class="btn primario grande">+ Novo registro</button>
+    <div class="linha">
+      <button id="btnDocx" class="btn">Relatório .docx</button>
+      <button id="btnPdf" class="btn">Relatório .pdf</button>
+      <button id="btnMapaInsp" class="btn">Mapa</button>
+    </div>
+    <h2 id="tituloRegistros">Registros</h2>
+    <ul id="listaRegistros" class="lista registros"></ul>
+    <p id="semRegistros" class="vazio" hidden>Nenhum registro nesta inspeção.</p>
+    <button id="btnExcluirInsp" class="btn perigo">Excluir inspeção</button>
+  </section>
+
+  <!-- Tela 4: pastas do app -->
+  <section id="telaArquivos" class="tela" hidden>
+    <p class="dica">Os arquivos ficam numa área interna do app neste aparelho. Para vê-los no gerenciador de arquivos do celular ou passá-los ao computador, use “Exportar tudo (.zip)”: o arquivo vai para Downloads com as três pastas.</p>
+    <p id="usoEspaco" class="dica"></p>
+    <button id="btnZipTudo" class="btn primario grande">Exportar tudo (.zip)</button>
+    <p id="semPastas" class="erro" hidden>Este navegador não oferece pastas para o app. Os dados continuam salvos; use o backup ou os relatórios.</p>
+    <h2>Relatórios</h2>
+    <ul id="listaRelatorios" class="lista arquivos-lista"></ul>
+    <h2>Registros (tabelas)</h2>
+    <ul id="listaTabelas" class="lista arquivos-lista"></ul>
+    <h2>Fotos</h2>
+    <ul id="listaFotos" class="lista arquivos-lista"></ul>
+  </section>
+
+  <!-- Tela 3: formulário de registro -->
+  <section id="telaRegistro" class="tela" hidden>
+    <form id="formRegistro" novalidate>
+      <div class="campo">
+        <label for="fAlim">Alimentador *</label>
+        <input id="fAlim" type="text" list="listaAlims" autocomplete="off" required>
+        <datalist id="listaAlims"></datalist>
+        <small class="dica">Vem preenchido com o alimentador da inspeção; altere se este registro for de outro.</small>
+      </div>
+
+      <div class="campo">
+        <label for="fTipo">Tipo de irregularidade *</label>
+        <select id="fTipo" required></select>
+      </div>
+
+      <div class="campo">
+        <label for="fDesc">Descrição</label>
+        <textarea id="fDesc" rows="3" placeholder="Ex.: poste de madeira com base podre, nº 060P1234"></textarea>
+      </div>
+
+      <div class="campo">
+        <label for="fData">Data/hora do registro *</label>
+        <div class="linha">
+          <input id="fData" type="text" inputmode="numeric" placeholder="dd/mm/aaaa hh:mm:ss" maxlength="19" required>
+          <button type="button" id="btnAgora" class="btn pequeno">Agora</button>
+        </div>
+      </div>
+
+      <div class="campo">
+        <label>Localização (graus decimais) *</label>
+        <div class="linha coords">
+          <input id="fLat" type="text" inputmode="decimal" placeholder="Latitude" required>
+          <input id="fLon" type="text" inputmode="decimal" placeholder="Longitude" required>
+        </div>
+        <small id="gpsInfo" class="dica"></small>
+        <div id="miniMapa" class="mini-mapa" hidden></div>
+        <small id="miniMapaDica" class="dica" hidden>Toque no mapa para ajustar o ponto.</small>
+        <div class="linha">
+          <button type="button" id="btnGps" class="btn">Buscar GPS de novo</button>
+          <button type="button" id="btnMapa" class="btn">Escolher no mapa</button>
+        </div>
+      </div>
+
+      <div class="campo">
+        <label>Imagem/foto *</label>
+        <div class="linha">
+          <label class="btn primario">Tirar foto<input id="fCamera" type="file" accept="image/*" capture="environment" hidden></label>
+          <label class="btn">Da galeria<input id="fGaleria" type="file" accept="image/*" hidden></label>
+        </div>
+        <img id="fPreview" class="preview" alt="Pré-visualização da foto" hidden>
+      </div>
+
+      <p id="erroForm" class="erro" hidden></p>
+      <button type="submit" class="btn primario grande">Salvar registro</button>
+      <button type="button" id="btnExcluirReg" class="btn perigo" hidden>Excluir registro</button>
+    </form>
+  </section>
+</main>
+
+<!-- Mapa (tela cheia) -->
+<div id="modalMapa" class="modal" hidden>
+  <div class="modal-topo">
+    <span id="mapaAviso">Toque no mapa ou arraste o marcador.</span>
+    <button id="btnFecharMapa" class="btn pequeno">Fechar</button>
+  </div>
+  <div id="mapa"></div>
+  <div class="modal-rodape">
+    <span id="mapaCoords"></span>
+    <button id="btnConfirmarMapa" class="btn primario">Usar este ponto</button>
+  </div>
+</div>
+
+<!-- Pergunta do alimentador -->
+<dialog id="dlgAlim">
+  <form method="dialog">
+    <h3 id="dlgAlimTitulo">Nova inspeção</h3>
+    <label for="dlgDist">Distribuidora</label>
+    <select id="dlgDist"></select>
+    <label for="dlgAlimInput" class="espaco-acima">Alimentador</label>
+    <input id="dlgAlimInput" type="text" autocomplete="off" placeholder="Digite o nome, código ou subestação" required>
+    <ul id="dlgAlimLista" class="sugestoes" hidden></ul>
+    <small id="dlgAlimDica" class="dica"></small>
+    <label for="dlgQualidade" class="espaco-acima">Qualidade das fotos no relatório</label>
+    <select id="dlgQualidade"></select>
+    <small id="dlgQualidadeDica" class="dica"></small>
+    <div class="linha fim">
+      <button type="button" class="btn" onclick="this.closest('dialog').close('cancelar')">Cancelar</button>
+      <button value="ok" id="dlgAlimOk" class="btn primario">Iniciar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Relatório pronto: compartilhar ou salvar -->
+<dialog id="dlgRelatorio">
+  <h3 id="dlgRelTitulo">Relatório pronto</h3>
+  <p id="dlgRelNome" class="nome-arquivo"></p>
+  <p id="dlgRelPasta" class="dica" hidden></p>
+  <button id="btnCompartilhar" class="btn primario grande">Compartilhar (WhatsApp, e-mail…)</button>
+  <p id="semCompartilhar" class="dica" hidden>Este navegador não permite compartilhar arquivos. Salve o arquivo e anexe-o no WhatsApp ou no e-mail.</p>
+  <div class="linha">
+    <button id="btnSalvarRel" class="btn">Salvar em Downloads</button>
+    <button id="btnFecharRel" class="btn">Fechar</button>
+  </div>
+  <button id="btnExcluirArq" class="btn perigo" hidden>Excluir arquivo</button>
+</dialog>
+
+<!-- Confirmação -->
+<dialog id="dlgConfirmar">
+  <form method="dialog">
+    <p id="dlgConfirmarTexto"></p>
+    <div class="linha fim">
+      <button type="button" class="btn" onclick="this.closest('dialog').close('cancelar')">Cancelar</button>
+      <button value="ok" id="dlgConfirmarOk" class="btn perigo-cheio">Excluir</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="aviso" class="aviso" hidden></div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="vendor/jspdf.umd.min.js"></script>
+<script src="js/dialogo.js"></script>
+<script src="js/db.js"></script>
+<script src="js/pastas.js"></script>
+<script src="js/relatorio.js"></script>
+<script src="js/rede.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
