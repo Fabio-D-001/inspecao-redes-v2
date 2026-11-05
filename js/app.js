@@ -722,6 +722,7 @@ function prepararMapa() {
     };
     mapa.on('overlayadd', lembrar(true));
     mapa.on('overlayremove', lembrar(false));
+    botaoPosicao().addTo(mapa);
   }
   aplicarRede(redeMapa, mapa, { aoTocar: mostrarEquipamento }, controleMapa);
 }
@@ -765,6 +766,64 @@ function mostrarEquipamento(it) {
   L.popup({ maxWidth: 260 }).setLatLng(it.ll).setContent(div).openOn(mapa);
 }
 
+// Posição atual no mapa: ponto azul com o círculo de precisão, que acompanha o GPS enquanto o mapa
+// está aberto. O botão abaixo do zoom centraliza o mapa na posição (e liga o GPS se estiver desligado).
+const posicao = { watch: null, ponto: null, circulo: null, ll: null, centrar: false, botao: null };
+function botaoPosicao() {
+  const Controle = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd() {
+      const div = L.DomUtil.create('div', 'leaflet-bar');
+      const a = L.DomUtil.create('a', 'btn-posicao', div);
+      a.href = '#';
+      a.title = 'Minha posição';
+      a.setAttribute('role', 'button');
+      a.setAttribute('aria-label', 'Mostrar minha posição');
+      a.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/>' +
+        '<path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.on(a, 'click', e => {
+        L.DomEvent.preventDefault(e);
+        if (posicao.ll) mapa.setView(posicao.ll, Math.max(mapa.getZoom(), 17));
+        else posicao.centrar = true;
+        seguirPosicao();
+      });
+      posicao.botao = a;
+      return div;
+    },
+  });
+  return new Controle();
+}
+function seguirPosicao() {
+  if (posicao.watch !== null || !('geolocation' in navigator)) return;
+  if (posicao.botao) posicao.botao.classList.add('buscando');
+  posicao.watch = navigator.geolocation.watchPosition(pos => {
+    const ll = L.latLng(pos.coords.latitude, pos.coords.longitude);
+    const raio = pos.coords.accuracy || 0;
+    posicao.ll = ll;
+    if (!posicao.ponto) {
+      posicao.circulo = L.circle(ll, { radius: raio, color: '#1a73e8', weight: 1, fillOpacity: 0.12, interactive: false });
+      posicao.ponto = L.circleMarker(ll, { radius: 7, color: '#fff', weight: 2, fillColor: '#1a73e8', fillOpacity: 1 })
+        .bindTooltip('Você está aqui');
+    }
+    posicao.circulo.setLatLng(ll).setRadius(raio).addTo(mapa);
+    posicao.ponto.setLatLng(ll).addTo(mapa).setTooltipContent(`Você está aqui (±${metros(raio)} m)`);
+    if (posicao.botao) { posicao.botao.classList.remove('buscando'); posicao.botao.classList.add('ativo'); }
+    if (posicao.centrar) { posicao.centrar = false; mapa.setView(ll, Math.max(mapa.getZoom(), 17)); }
+  }, err => {
+    if (err.code === 3) return; // continua esperando o GPS
+    pararPosicao();
+    $('mapaAviso').textContent = err.code === 1 ? 'Permissão de localização negada: a sua posição não aparece no mapa.'
+      : 'Não foi possível obter a sua posição agora.';
+  }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 });
+}
+function pararPosicao() {
+  if (posicao.watch !== null) navigator.geolocation.clearWatch(posicao.watch);
+  posicao.watch = null;
+  posicao.centrar = false;
+  if (posicao.botao) posicao.botao.classList.remove('buscando', 'ativo');
+}
+
 function atualizarPonto(ll) {
   pontoEscolhido = ll;
   $('mapaCoords').textContent = `${ll.lat.toFixed(6)}, ${ll.lng.toFixed(6)}`;
@@ -801,8 +860,7 @@ $('btnConfirmarMapa').addEventListener('click', () => {
   $('fLon').value = pontoEscolhido.lng.toFixed(6);
   $('gpsInfo').textContent = 'Localização escolhida no mapa.';
   $('gpsInfo').className = 'dica';
-  $('modalMapa').hidden = true;
-  mapa.closePopup();
+  fecharMapa();
   mostrarNoMiniMapa(pontoEscolhido.lat, pontoEscolhido.lng, null);
 });
 
@@ -826,9 +884,15 @@ $('btnMapaInsp').addEventListener('click', async () => {
   if (regs.length > 1) L.polyline(pts, { color: '#ea7501', weight: 3, dashArray: '4 4', interactive: false }).addTo(camadaPontos);
   if (pts.length) mapa.fitBounds(pts, { padding: [40, 40], maxZoom: 18 });
   else mapa.fitBounds(Rede.limites(estado.rede), { padding: [20, 20] });
+  seguirPosicao();
 });
 
-$('btnFecharMapa').addEventListener('click', () => { $('modalMapa').hidden = true; mapa.closePopup(); });
+function fecharMapa() {
+  $('modalMapa').hidden = true;
+  mapa.closePopup();
+  pararPosicao();
+}
+$('btnFecharMapa').addEventListener('click', fecharMapa);
 
 /* ------------------------------ pastas do app ------------------------------ */
 

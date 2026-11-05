@@ -15,6 +15,7 @@ A versão 2.0 parte da 1.0 (pasta `app/`, que continua publicada e sem alteraç�
   - reguladores de tensão e bancos de capacitores;
   - postes (só com zoom alto);
   - subestação.
+- **Minha posição no mapa**: o mapa da inspeção mostra a posição atual (ponto azul com o círculo de precisão do GPS). O botão abaixo do zoom centraliza o mapa nela; no "Escolher no mapa" ele também liga o GPS. A busca para quando o mapa fecha.
 - **Escolher camadas**: o botão de camadas, no canto do mapa, liga e desliga cada tipo de equipamento. O app lembra a escolha.
 - **Equipamento no registro**: tocar num equipamento mostra código, potência, fases e estado normal (aberta ou fechada). Ao escolher o ponto de um registro, dá para usar a posição do equipamento e citá-lo na descrição.
 - **Uso offline**: a rede de um alimentador já aberto fica guardada no aparelho e funciona sem internet. Abra a inspeção com internet antes de ir a campo.

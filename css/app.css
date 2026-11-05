@@ -154,3 +154,8 @@ h2 { color: var(--laranja-escuro); }
 .equip td { padding: 1px 6px 1px 0; vertical-align: top; }
 .equip td:first-child { color: var(--suave); }
 .equip .btn { margin-top: 8px; width: 100%; min-height: 36px; }
+/* Botão "minha posição" no mapa */
+.leaflet-bar a.btn-posicao { display: flex; align-items: center; justify-content: center; color: #333; }
+.leaflet-bar a.btn-posicao.buscando { color: #888; animation: piscar 1s infinite; }
+.leaflet-bar a.btn-posicao.ativo { color: #1a73e8; }
+@keyframes piscar { 50% { opacity: .4; } }
