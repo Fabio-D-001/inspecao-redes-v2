@@ -66,6 +66,8 @@ $('fData').addEventListener('input', e => {
   e.target.value = out;
 });
 
+const esc = t => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 const numero = txt => {
   const v = parseFloat(String(txt).replace(',', '.'));
   return Number.isFinite(v) ? v : null;
@@ -347,25 +349,32 @@ async function registrosOrdenados(inspecaoId) {
   return (await DB.registrosDe(inspecaoId)).sort((a, b) => a.dataHora - b.dataHora);
 }
 
-// Redes que aparecem nos mapas: as carregadas, a não ser que a pessoa tenha ocultado a rede.
-const redesNoMapa = () => (estado.inspecao && estado.inspecao.redeOculta ? [] : estado.redes.filter(r => r.d).map(r => r.d));
-const atualizarBotaoMapa = () => { $('btnMapaInsp').disabled = !estado.nRegistros && !redesNoMapa().length; };
-
-// Alimentadores cuja rede a inspeção mostra: o da inspeção e os acrescentados por "Rede de outro alimentador".
+// Alimentadores cuja rede a inspeção mostra: o da inspeção e os acrescentados com "+ Alimentador" no mapa.
 const circuitosDe = insp => [].concat(
   insp.circuito && insp.distribuidora ? [{ distribuidora: insp.distribuidora, circuito: insp.circuito, extra: false }] : [],
   (insp.redesExtras || []).map(r => ({ distribuidora: r.distribuidora, circuito: r.circuito, extra: true })));
-const mesmoCircuito = (a, b) => a.distribuidora.id === b.distribuidora.id && a.circuito.arq === b.circuito.arq;
+const chaveDe = r => `${r.distribuidora.id}/${r.circuito.arq}`;
+const ocultas = () => (estado.inspecao && estado.inspecao.redesOcultas) || [];
+const carregadas = () => estado.redes.filter(r => r.d);
+// Redes que aparecem nos mapas: as carregadas que não foram desligadas no botão de camadas.
+const redesNoMapa = () => carregadas().filter(r => !ocultas().includes(chaveDe(r))).map(r => r.d);
+const atualizarBotaoMapa = () => {
+  $('btnMapaInsp').disabled = !estado.nRegistros && !carregadas().length && !(estado.inspecao && estado.inspecao.distribuidora);
+};
 
-// Carrega as redes (com internet, ou da cópia guardada pelo app).
+// Carrega as redes (com internet, ou da cópia guardada pelo app). As já carregadas continuam no mapa.
 async function carregarRede(insp) {
+  const antes = estado.redesDe === insp.id ? estado.redes : [];
   estado.redesDe = insp.id;
-  estado.redes = MODO_ARTEFATO ? [] : circuitosDe(insp).map(r => ({ ...r, d: null }));
-  estado.redesCarregando = estado.redes.length > 0;
+  estado.redes = MODO_ARTEFATO ? [] : circuitosDe(insp).map(r => {
+    const ja = antes.find(x => x.d && chaveDe(x) === chaveDe(r));
+    return { ...r, d: ja ? ja.d : null };
+  });
+  estado.redesCarregando = estado.redes.some(r => !r.d);
   desenharRedes();
   if (!estado.redesCarregando) return;
-  const res = await Promise.all(estado.redes.map(r => Rede.dados(r.distribuidora.id, r.circuito.arq)
-    .then(d => ({ ...r, d }), () => ({ ...r, d: null }))));
+  const res = await Promise.all(estado.redes.map(r => (r.d ? Promise.resolve(r) : Rede.dados(r.distribuidora.id, r.circuito.arq)
+    .then(d => ({ ...r, d }), () => ({ ...r, d: null })))));
   if (!estado.inspecao || estado.inspecao.id !== insp.id || estado.redesDe !== insp.id) return;
   estado.redes = res;
   estado.redesCarregando = false;
@@ -375,38 +384,25 @@ addEventListener('online', () => {
   if (estado.inspecao && estado.redes.some(r => !r.d) && !$('telaInspecao').hidden) carregarRede(estado.inspecao);
 });
 
-// Quadro "Rede no mapa" da tela da inspeção.
+// Situação da rede na tela da inspeção; com o mapa aberto, atualiza as camadas.
 function desenharRedes() {
   const insp = estado.inspecao;
   const st = $('redeStatus');
   const status = (txt, classe = '') => { st.textContent = txt; st.className = 'rede-status ' + classe; st.hidden = !txt; };
-  $('blocoRedes').hidden = MODO_ARTEFATO || !insp.distribuidora;
-  $('btnRedeVer').textContent = insp.redeOculta ? 'Mostrar rede' : 'Ocultar rede';
-  $('btnRedeVer').hidden = !estado.redes.length;
-  const n = (v, s, p) => `${v.length} ${v.length === 1 ? s : p}`;
-  $('listaRedes').replaceChildren(...estado.redes.map((r, i) => {
-    const li = document.createElement('li');
-    li.innerHTML = '<div class="info"><strong></strong><small></small></div>';
-    li.querySelector('strong').textContent = Rede.rotulo(r.circuito) + (r.extra ? '' : ' (da inspeção)');
-    li.querySelector('small').textContent = r.d ? `${n(r.d.trafos, 'transformador', 'transformadores')}, ${n(r.d.chaves, 'chave', 'chaves')}` +
-      (r.distribuidora.id !== insp.distribuidora.id ? ` · ${r.distribuidora.nome}` : '')
-      : estado.redesCarregando ? 'Carregando…' : navigator.onLine ? 'Não foi possível carregar.' : 'Sem internet: carrega quando houver conexão.';
-    if (r.extra) {
-      const x = document.createElement('button');
-      x.className = 'btn pequeno';
-      x.textContent = 'Tirar';
-      x.setAttribute('aria-label', `Tirar a rede do alimentador ${Rede.rotulo(r.circuito)}`);
-      x.addEventListener('click', () => tirarRede(i));
-      li.appendChild(x);
-    }
-    return li;
-  }));
-  if (!insp.distribuidora) status('');
-  else if (!estado.redes.length) status(insp.circuito ? '' : 'Alimentador da inspeção fora da lista da ANEEL: sem rede no mapa.');
-  else if (insp.redeOculta) status('Rede oculta: não aparece nos mapas nem no mini-mapa.');
+  const prontas = carregadas();
+  const falhas = estado.redes.length - prontas.length;
+  if (MODO_ARTEFATO || !insp.distribuidora) status('');
   else if (estado.redesCarregando) status('Carregando a rede…');
-  else status(estado.redes.every(r => r.d) ? 'Rede nos mapas (BDGD/ANEEL). Toque num equipamento para ver os dados.' : '', 'ok');
+  else if (!estado.redes.length) status(insp.circuito ? '' : 'Alimentador fora da lista da ANEEL. No mapa, “+ Alimentador” carrega a rede de outro.');
+  else if (prontas.length && !redesNoMapa().length) status('Rede desligada no botão de camadas do mapa.')
+  else if (!prontas.length) status(navigator.onLine ? 'Não foi possível carregar a rede.' : 'Sem internet: a rede aparece no mapa quando houver conexão.', 'erro');
+  else {
+    const extras = prontas.filter(r => r.extra).length;
+    status(`Rede no mapa (BDGD/ANEEL)${extras ? `, com mais ${extras} ${extras === 1 ? 'alimentador' : 'alimentadores'}` : ''}.` +
+      (falhas ? ` ${falhas === 1 ? 'Uma rede não carregou' : `${falhas} redes não carregaram`}.` : ''), falhas ? 'erro' : 'ok');
+  }
   atualizarBotaoMapa();
+  if (mapa && !$('modalMapa').hidden) prepararMapa();
 }
 
 async function salvarInspecao(campos) {
@@ -416,26 +412,32 @@ async function salvarInspecao(campos) {
   return insp;
 }
 
-$('btnRedeVer').addEventListener('click', async () => {
-  await salvarInspecao({ redeOculta: !estado.inspecao.redeOculta });
-  desenharRedes();
-});
-
-$('btnRedeOutra').addEventListener('click', async () => {
+// "+ Alimentador" no mapa: carrega a rede de outro alimentador (até de outra distribuidora).
+async function adicionarRede() {
   const i = estado.inspecao;
   const dados = await perguntarInspecao('Rede de outro alimentador', { distribuidora: i.distribuidora || null, soRede: true }, 'Carregar rede');
   if (!dados || !dados.circuito) return;
   const novo = { distribuidora: dados.distribuidora, circuito: dados.circuito };
-  if (circuitosDe(estado.inspecao).some(r => mesmoCircuito(r, novo))) { avisar('A rede deste alimentador já está na inspeção.'); return; }
-  const insp = await salvarInspecao({ redesExtras: (estado.inspecao.redesExtras || []).concat([novo]), redeOculta: false });
-  carregarRede(insp);
-});
+  const k = chaveDe(novo);
+  if (circuitosDe(estado.inspecao).some(r => chaveDe(r) === k)) {
+    if (ocultas().includes(k)) { await salvarInspecao({ redesOcultas: ocultas().filter(c => c !== k) }); redeMapa.chave = null; desenharRedes(); }
+    avisar('A rede deste alimentador já está no mapa.');
+    return;
+  }
+  avisar('Carregando a rede…', 10000);
+  await carregarRede(await salvarInspecao({ redesExtras: (estado.inspecao.redesExtras || []).concat([novo]) }));
+  const r = estado.redes.find(x => chaveDe(x) === k);
+  if (r && r.d) {
+    if (mapa && !$('modalMapa').hidden) mapa.fitBounds(Rede.limites(r.d), { padding: [20, 20] });
+    avisar(`Rede do alimentador ${Rede.rotulo(r.circuito)} no mapa.`);
+  } else avisar(navigator.onLine ? 'Não foi possível carregar a rede desse alimentador.' : 'Sem internet: a rede desse alimentador aparece quando houver conexão.', 6000);
+}
 
-async function tirarRede(indice) {
-  const r = estado.redes[indice];
-  const insp = await salvarInspecao({ redesExtras: (estado.inspecao.redesExtras || []).filter(x => !mesmoCircuito(x, r)) });
-  estado.redes = estado.redes.filter(x => x !== r);
-  if (!estado.redesCarregando) desenharRedes(); else carregarRede(insp);
+async function tirarRede(k) {
+  await salvarInspecao({ redesExtras: (estado.inspecao.redesExtras || []).filter(x => chaveDe(x) !== k),
+    redesOcultas: ocultas().filter(c => c !== k) });
+  estado.redes = estado.redes.filter(x => chaveDe(x) !== k);
+  desenharRedes();
 }
 
 async function telaInspecao(id) {
@@ -763,21 +765,17 @@ function camadasBase(m) {
   return L.control.layers({ 'Ruas': ruas, 'Satélite': satelite }).addTo(m);
 }
 
-// Põe no mapa "m" as redes da inspeção (redesNoMapa), trocando as anteriores. "alvo" guarda o que
-// está desenhado; com "controle", cada camada vira uma opção que liga/desliga no botão de camadas.
-// Os equipamentos ganham rótulos com o código quando o mapa está bem aproximado.
-function aplicarRede(alvo, m, opcoes, controle) {
+// Põe no mini-mapa as redes ligadas (redesNoMapa), trocando as anteriores, com o código dos equipamentos
+// quando bem aproximado.
+function aplicarRede(alvo, m, opcoes) {
   const redes = redesNoMapa();
   const chave = redes.map(d => `${d.dist}/${d.cod}`).join('|');
   if (alvo.chave === chave) return;
   if (alvo.tirarRotulos) alvo.tirarRotulos();
-  alvo.itens.forEach(c => { if (controle) controle.removeLayer(c.camada); c.camada.remove(); });
+  alvo.itens.forEach(c => c.camada.remove());
   alvo.chave = chave;
   alvo.itens = redes.length ? Rede.camadas(m, redes, opcoes) : [];
-  for (const c of alvo.itens) {
-    if (controle) controle.addOverlay(c.camada, c.rotulo);
-    if (c.visivel) c.camada.addTo(m);
-  }
+  for (const c of alvo.itens) if (c.visivel) c.camada.addTo(m);
   alvo.tirarRotulos = alvo.itens.length ? Rede.rotulos(m, alvo.itens) : null;
 }
 
@@ -812,24 +810,118 @@ function mostrarNoMiniMapa(lat, lon, precisao) {
 }
 
 let mapa, marcador, camadaPontos, pontoEscolhido, controleMapa;
-const redeMapa = { chave: null, itens: [] };
+// Mapa grande: no botão de camadas, cada alimentador é uma camada (liga/desliga a rede dele) e cada tipo
+// de equipamento também (vale para todos os alimentadores). Por baixo, há um grupo por alimentador e tipo.
+const redeMapa = { chave: null, redes: [], tipos: [], tirarRotulos: null };
 let escolhendoPonto = false;
+
+function rotuloAlim(r) {
+  const nome = `<span class="leg-alim">Alim. ${esc(Rede.rotulo(r.circuito))}</span>`;
+  const dist = r.distribuidora.id !== estado.inspecao.distribuidora.id ? ` <small>${esc(r.distribuidora.nome)}</small>` : '';
+  return nome + dist + (r.extra ? ` <a href="#" class="tirar-rede" data-chave="${esc(chaveDe(r))}">tirar</a>` : ' <small>(da inspeção)</small>');
+}
+
+function aplicarRedeMapa() {
+  const lista = carregadas();
+  const chave = lista.map(chaveDe).join('|');
+  if (redeMapa.chave === chave) return;
+  if (redeMapa.tirarRotulos) redeMapa.tirarRotulos();
+  redeMapa.redes.forEach(x => { controleMapa.removeLayer(x.grupo); x.grupo.remove(); });
+  redeMapa.tipos.forEach(t => { controleMapa.removeLayer(t.liga); t.liga.remove(); });
+  if (redeMapa.titulos) redeMapa.titulos.forEach(t => t.remove());
+  redeMapa.chave = chave;
+  const tipos = {};
+  redeMapa.redes = lista.map(r => {
+    const subs = Rede.camadas(mapa, [r.d], { aoTocar: mostrarEquipamento });
+    const grupo = L.layerGroup();
+    for (const c of subs) {
+      const t = tipos[c.chave] || (tipos[c.chave] = { chave: c.chave, base: c.base, nota: c.nota, linha: c.linha, n: 0, visivel: c.visivel, liga: L.layerGroup() });
+      t.n += c.n;
+      if (c.visivel) grupo.addLayer(c.camada);
+    }
+    return { r, grupo, subs };
+  });
+  redeMapa.tipos = Rede.ORDEM.filter(k => tipos[k]).map(k => tipos[k]);
+  for (const x of redeMapa.redes) {
+    controleMapa.addOverlay(x.grupo, rotuloAlim(x.r));
+    if (!ocultas().includes(chaveDe(x.r))) x.grupo.addTo(mapa);
+  }
+  for (const t of redeMapa.tipos) {
+    controleMapa.addOverlay(t.liga, t.base + (t.linha ? '' : ` <small>(${t.n})${t.nota ? `, ${t.nota}` : ''}</small>`));
+    if (t.visivel) t.liga.addTo(mapa);
+  }
+  redeMapa.tirarRotulos = Rede.rotulos(mapa, [].concat(...redeMapa.redes.map(x => x.subs)));
+  titulosCamadas();
+}
+
+// Títulos "Alimentadores" e "Equipamentos" na lista de camadas do botão.
+function titulosCamadas() {
+  const lista = controleMapa.getContainer().querySelector('.leaflet-control-layers-overlays');
+  lista.querySelectorAll('.titulo-camadas').forEach(t => t.remove());
+  if (!redeMapa.redes.length) return;
+  const titulo = txt => { const t = document.createElement('span'); t.className = 'titulo-camadas'; t.textContent = txt; return t; };
+  lista.insertBefore(titulo('Alimentadores'), lista.firstChild);
+  const primeiroTipo = lista.children[redeMapa.redes.length + 1];
+  if (primeiroTipo) lista.insertBefore(titulo('Equipamentos'), primeiroTipo);
+}
+
+function botaoAlimentador() {
+  const Controle = L.Control.extend({
+    options: { position: 'topright' },
+    onAdd() {
+      const div = L.DomUtil.create('div', 'leaflet-bar');
+      const a = L.DomUtil.create('a', 'btn-alim', div);
+      a.href = '#';
+      a.textContent = '+ Alimentador';
+      a.title = 'Carregar a rede de outro alimentador';
+      a.setAttribute('role', 'button');
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.on(a, 'click', e => { L.DomEvent.preventDefault(e); adicionarRede(); });
+      return div;
+    },
+  });
+  return new Controle();
+}
+
 function prepararMapa() {
   if (!mapa) {
     mapa = L.map('mapa', { zoomControl: true, preferCanvas: true });
     controleMapa = camadasBase(mapa);
+    if (!MODO_ARTEFATO) botaoAlimentador().addTo(mapa);
     camadaPontos = L.layerGroup().addTo(mapa);
     mapa.on('click', e => { if (escolhendoPonto && marcador) { marcador.setLatLng(e.latlng); atualizarPonto(e.latlng); } });
-    // lembra quais equipamentos a pessoa quer ver
-    const lembrar = visivel => e => {
-      const c = redeMapa.itens.find(x => x.camada === e.layer);
-      if (c) Rede.lembrar(c.chave, visivel);
-    };
-    mapa.on('overlayadd', lembrar(true));
-    mapa.on('overlayremove', lembrar(false));
+    mapa.on('overlayadd overlayremove', e => {
+      const liga = e.type === 'overlayadd';
+      // tipo de equipamento: vale para todos os alimentadores e fica lembrado
+      const t = redeMapa.tipos.find(x => x.liga === e.layer);
+      if (t) {
+        t.visivel = liga;
+        Rede.lembrar(t.chave, liga);
+        for (const x of redeMapa.redes) for (const c of x.subs) if (c.chave === t.chave) {
+          if (liga) x.grupo.addLayer(c.camada); else x.grupo.removeLayer(c.camada);
+        }
+        return;
+      }
+      // alimentador: fica lembrado na inspeção (vale também para o mini-mapa)
+      const x = redeMapa.redes.find(y => y.grupo === e.layer);
+      if (x) {
+        const k = chaveDe(x.r);
+        salvarInspecao({ redesOcultas: liga ? ocultas().filter(c => c !== k) : ocultas().concat([k]) });
+      }
+    });
+    // os títulos somem quando o Leaflet redesenha a lista
+    mapa.on('overlayadd overlayremove baselayerchange', () => setTimeout(titulosCamadas, 0));
+    // "tirar" ao lado de um alimentador acrescentado (sem ligar/desligar a camada)
+    controleMapa.getContainer().addEventListener('click', e => {
+      const a = e.target.closest && e.target.closest('.tirar-rede');
+      if (!a) return;
+      e.preventDefault();
+      e.stopPropagation();
+      tirarRede(a.getAttribute('data-chave'));
+    }, true);
     botaoPosicao().addTo(mapa);
   }
-  aplicarRede(redeMapa, mapa, { aoTocar: mostrarEquipamento }, controleMapa);
+  aplicarRedeMapa();
 }
 
 // Janela de um equipamento tocado no mapa. Ao escolher o ponto de um registro, dá para usar a posição
@@ -983,7 +1075,7 @@ $('btnMapaInsp').addEventListener('click', async () => {
   camadaPontos.clearLayers();
   $('btnConfirmarMapa').hidden = true;
   $('mapaAviso').textContent = `Alim. ${estado.inspecao.alimentador}: ${regs.length} ${regs.length === 1 ? 'registro' : 'registros'}.` +
-    (redesNoMapa().length ? ' Use o botão de camadas para escolher os equipamentos.' : '');
+    (carregadas().length ? ' No botão de camadas, ligue ou desligue alimentadores e equipamentos.' : ' Use “+ Alimentador” para carregar a rede.');
   $('mapaCoords').textContent = '';
   const pts = regs.map((r, i) => {
     const popup = document.createElement('div');
@@ -993,8 +1085,10 @@ $('btnMapaInsp').addEventListener('click', async () => {
     return [r.lat, r.lon];
   });
   if (regs.length > 1) L.polyline(pts, { color: '#ea7501', weight: 3, dashArray: '4 4', interactive: false }).addTo(camadaPontos);
+  const todas = carregadas().map(r => r.d);
   if (pts.length) mapa.fitBounds(pts, { padding: [40, 40], maxZoom: 18 });
-  else mapa.fitBounds(Rede.limites(redesNoMapa()), { padding: [20, 20] });
+  else if (todas.length) mapa.fitBounds(Rede.limites(redesNoMapa().length ? redesNoMapa() : todas), { padding: [20, 20] });
+  else mapa.setView([-22.5, -48.5], 7); // estado de SP
   seguirPosicao();
 });
 

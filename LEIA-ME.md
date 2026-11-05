@@ -16,7 +16,11 @@ A versão 2.0 parte da 1.0 (pasta `app/`, que continua publicada e sem alteraç�
   - postes (só com zoom alto);
   - subestação.
 - **Código dos equipamentos no mapa**: com o mapa bem aproximado (zoom 17 ou mais), cada equipamento das camadas ligadas mostra o seu código: transformadores, chaves, religadores, reguladores, capacitores e subestação. Vale no mapa e no mini-mapa do registro, que agora mostra também os equipamentos. O mini-mapa segue as camadas escolhidas no mapa grande.
-- **Rede de outros alimentadores**: na tela da inspeção, o quadro "Rede no mapa" tem o botão **+ Rede de outro alimentador**, que acrescenta a rede de qualquer alimentador da lista, inclusive de outra distribuidora. **Tirar** remove essa rede, e **Ocultar rede / Mostrar rede** liga e desliga toda a rede nos mapas. Ao usar a posição de um equipamento de outro alimentador num registro, o alimentador do registro passa a ser esse.
+- **Rede de outros alimentadores, no mapa**: o botão **+ Alimentador**, no canto do mapa, carrega a rede de qualquer alimentador da lista, inclusive de outra distribuidora. No botão de camadas:
+  - a seção "Alimentadores" liga e desliga a rede de cada alimentador, e o app lembra a escolha em cada inspeção;
+  - **tirar**, ao lado de um alimentador acrescentado, remove a rede dele;
+  - a seção "Equipamentos" liga e desliga cada tipo de equipamento em todos os alimentadores.
+  - O mini-mapa do registro segue essas escolhas. Ao usar a posição de um equipamento de outro alimentador num registro, o alimentador do registro passa a ser esse.
 - **Mapa .kmz junto com o relatório**: ao gerar o .docx ou o .pdf, o app gera também `Mapa_Inspecao_<alimentador>_<data>.kmz`, que vai para a pasta Relatórios e é oferecido junto para compartilhar ou salvar. Ele abre no Google Earth, no Google My Maps e no QGIS, e tem:
   - a pasta "Registros (irregularidades)", com um ponto por foto. Cada ponto traz o tipo, a descrição, o alimentador, a data/hora, as coordenadas e a foto em qualidade baixa. Há também o percurso, desligado ao abrir;
   - uma pasta para cada rede carregada, com uma subpasta por tipo de equipamento. Os postes vêm desligados ao abrir.

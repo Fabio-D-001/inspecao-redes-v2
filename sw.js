@@ -1,7 +1,7 @@
 // Service worker: guarda o aplicativo para uso offline, as áreas do mapa já visitadas e a rede
 // dos alimentadores já abertos. Os nomes dos caches começam com "v2-" porque a versão 1.0 usa o
 // mesmo endereço (github.io) e o mesmo armazenamento de caches.
-const VERSAO = '2.1.0';
+const VERSAO = '2.2.0';
 const APP = `v2-app-${VERSAO}`;
 const MAPA = 'v2-mapa-tiles';
 const DADOS = 'v2-dados-2025';

@@ -27,7 +27,7 @@ const Rede = (() => {
     { chave: 'religadores', rotulo: 'Religadores, disjuntores e seccionalizadores', cor: '#212529', borda: '#ffd60a', raio: 6, padrao: true },
     { chave: 'reguladores', rotulo: 'Reguladores de tensão', cor: '#4f772d', raio: 6, padrao: true },
     { chave: 'capacitores', rotulo: 'Bancos de capacitores', cor: '#9c6644', raio: 6, padrao: true },
-    { chave: 'postes', rotulo: 'Postes (aparecem com zoom ≥ 16)', cor: '#6c757d', raio: 2.5, padrao: false },
+    { chave: 'postes', rotulo: 'Postes', nota: 'com zoom ≥ 16', cor: '#6c757d', raio: 2.5, padrao: false },
     { chave: 'sub', rotulo: 'Subestação', cor: '#ffd60a', borda: '#212529', raio: 9, padrao: true },
   ];
 
@@ -166,8 +166,9 @@ const Rede = (() => {
       }
       if (!n) continue;
       const rot = `<span class="leg${c.linha ? ' leg-linha' : ''}" style="background:${c.cor}"></span>${c.rotulo}` +
-        (c.linha ? '' : ` <small>(${n})</small>`);
-      saida.push({ chave: c.chave, rotulo: rot, camada: grupo, visivel: visivel(c), pontos });
+        (c.linha ? '' : ` <small>(${n})${c.nota ? `, ${c.nota}` : ''}</small>`);
+      saida.push({ chave: c.chave, rotulo: rot, camada: grupo, visivel: visivel(c), pontos, n, linha: !!c.linha,
+        base: `<span class="leg${c.linha ? ' leg-linha' : ''}" style="background:${c.cor}"></span>${c.rotulo}`, nota: c.nota || '' });
     }
     return saida;
   }
@@ -216,7 +217,7 @@ const Rede = (() => {
   function exportar(d) {
     const saida = [];
     for (const c of CAMADAS) {
-      const item = { chave: c.chave, rotulo: c.rotulo.replace(/ \(.*\)$/, ''), cor: c.cor, borda: c.borda || null };
+      const item = { chave: c.chave, rotulo: c.rotulo, cor: c.cor, borda: c.borda || null };
       if (c.linha) item.linhas = linhas(d, c.chave);
       else if (c.chave === 'postes') {
         const p = d.postes || [];
@@ -230,5 +231,6 @@ const Rede = (() => {
   }
 
   return { distribuidoras, alimentadores, rotulo, filtrar, igual, dados, camadas, rotulos, limites, exportar, lembrar,
+    ORDEM: CAMADAS.map(c => c.chave),
     visivelChave: chave => visivel(CAMADAS.find(c => c.chave === chave)) };
 })();

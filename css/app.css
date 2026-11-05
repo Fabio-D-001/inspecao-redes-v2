@@ -160,17 +160,12 @@ h2 { color: var(--laranja-escuro); }
 .leaflet-bar a.btn-posicao.ativo { color: #1a73e8; }
 @keyframes piscar { 50% { opacity: .4; } }
 /* Versão 2.1: redes no mapa, rótulos dos equipamentos e vários arquivos no diálogo */
-.redes { display: flex; flex-direction: column; gap: 8px; }
-.redes-topo { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.lista-redes { list-style: none; margin: 0; padding: 0; }
-.lista-redes li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0;
-  border-top: 1px solid var(--borda); }
-.lista-redes li:first-child { border-top: 0; }
-.lista-redes .info { min-width: 0; }
-.lista-redes strong { display: block; }
-.lista-redes small { color: var(--suave); display: block; }
-#btnRedeOutra { align-self: flex-start; }
 .rede-status[hidden] { display: none; }
 .rotulo-equip span { display: inline-block; white-space: nowrap; font: 600 11px/1.2 system-ui, sans-serif; color: #1b1b1b;
   text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff; }
 .nome-arquivo { white-space: pre-line; }
+/* Versão 2.2: alimentadores como camadas do mapa */
+.leg-alim { font-weight: 700; }
+.leaflet-control-layers .tirar-rede { margin-left: 6px; font-size: 12px; color: var(--perigo); text-decoration: underline; }
+.leaflet-control-layers .titulo-camadas { display: block; margin: 6px 0 2px; font-size: 12px; color: var(--suave); text-transform: uppercase; letter-spacing: .04em; }
+.leaflet-bar a.btn-alim { width: auto; padding: 0 10px; font: 600 13px/30px system-ui, sans-serif; color: #333; white-space: nowrap; }
