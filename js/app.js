@@ -172,7 +172,12 @@ async function telaInicio() {
 const QUALIDADES = Relatorio.QUALIDADES;
 const qualidadeDe = insp => (QUALIDADES[insp.qualidade] ? insp.qualidade : 'media');
 $('dlgQualidade').append(...Object.entries(QUALIDADES).map(([v, q]) => new Option(q.rotulo, v)));
-const dicaQualidade = () => { $('dlgQualidadeDica').textContent = QUALIDADES[$('dlgQualidade').value].dica; };
+// Quantos registros com foto cabem num relatório que ainda dá para enviar por e-mail.
+const maxRegistros = q => `máx. ~${q.maxRegistros} registros com foto (relatório de até ${Relatorio.LIMITE_MB} MB, para e-mail)`;
+const dicaQualidade = () => {
+  const q = QUALIDADES[$('dlgQualidade').value];
+  $('dlgQualidadeDica').textContent = `${q.dica}; ${maxRegistros(q)}.`;
+};
 $('dlgQualidade').addEventListener('change', dicaQualidade);
 
 // Distribuidora e alimentador: a lista vem da BDGD da ANEEL (pasta dados/). Sem internet e sem a lista
@@ -449,7 +454,6 @@ async function telaInspecao(id) {
   $('distAtual').hidden = !insp.distribuidora;
   $('alimAtual').textContent = insp.alimentador;
   if (estado.redesDe !== insp.id) carregarRede(insp); else desenharRedes();
-  $('qualidadeAtual').textContent = `Fotos no relatório: qualidade ${QUALIDADES[qualidadeDe(insp)].rotulo.toLowerCase()}`;
 
   estado.urls.forEach(URL.revokeObjectURL);
   estado.urls = [];
@@ -459,15 +463,23 @@ async function telaInspecao(id) {
   ['btnDocx', 'btnPdf'].forEach(b => { $(b).disabled = regs.length === 0; });
   estado.nRegistros = regs.length;
   atualizarBotaoMapa();
+  const q = QUALIDADES[qualidadeDe(insp)];
+  const comFoto = regs.filter(r => r.foto).length;
+  $('qualidadeAtual').textContent = `Fotos no relatório: qualidade ${q.rotulo.toLowerCase()} · ${maxRegistros(q)}` +
+    (comFoto > q.maxRegistros ? `. Esta inspeção já tem ${comFoto}: use uma qualidade menor para enviar por e-mail.` : '');
+  $('qualidadeAtual').className = comFoto > q.maxRegistros ? 'erro-texto' : '';
 
   const ul = $('listaRegistros');
   ul.innerHTML = '';
   regs.forEach((r, i) => {
-    const url = URL.createObjectURL(r.foto);
-    estado.urls.push(url);
     const li = document.createElement('li');
-    li.innerHTML = `<span class="num">${i + 1}</span><img alt=""><div class="info"><strong></strong><small></small><small></small></div>`;
-    li.querySelector('img').src = url;
+    li.innerHTML = `<span class="num">${i + 1}</span>${r.foto ? '<img alt="">' : '<span class="sem-foto">sem foto</span>'}` +
+      '<div class="info"><strong></strong><small></small><small></small></div>';
+    if (r.foto) {
+      const url = URL.createObjectURL(r.foto);
+      estado.urls.push(url);
+      li.querySelector('img').src = url;
+    }
     li.querySelector('strong').textContent = r.tipo;
     const [s1, s2] = li.querySelectorAll('small');
     s1.textContent = r.descricao || '—';
@@ -606,6 +618,7 @@ function definirFoto(foto) {
   if (img.src) URL.revokeObjectURL(img.src);
   if (foto) { img.src = URL.createObjectURL(foto.blob); img.hidden = false; }
   else { img.removeAttribute('src'); img.hidden = true; }
+  $('btnRemoverFoto').hidden = !foto;
 }
 
 async function telaRegistro(id) {
@@ -683,6 +696,8 @@ $('btnGps').addEventListener('click', iniciarGps);
   $('gpsInfo').className = 'dica';
 }));
 
+$('btnRemoverFoto').addEventListener('click', () => definirFoto(null));
+
 for (const campo of ['fCamera', 'fGaleria']) {
   $(campo).addEventListener('change', async e => {
     const arq = e.target.files[0];
@@ -707,7 +722,6 @@ $('formRegistro').addEventListener('submit', async e => {
   if (!tipo) erros.push('escolha o tipo de irregularidade');
   if (dataHora === null) erros.push('informe a data/hora no formato dd/mm/aaaa hh:mm:ss');
   if (lat === null || lat < -90 || lat > 90 || lon === null || lon < -180 || lon > 180) erros.push('informe a localização (latitude e longitude válidas)');
-  if (!estado.foto) erros.push('adicione a foto');
   if (erros.length) {
     $('erroForm').textContent = 'Falta: ' + erros.join('; ') + '.';
     $('erroForm').hidden = false;
@@ -727,9 +741,9 @@ $('formRegistro').addEventListener('submit', async e => {
     descricao: $('fDesc').value.trim(),
     dataHora, lat, lon,
     precisao: estado.coordsManual ? (antigo ? antigo.precisao : null) : (Number.isFinite(melhorPrecisao) ? melhorPrecisao : null),
-    foto: estado.foto.blob,
-    fotoLargura: estado.foto.largura,
-    fotoAltura: estado.foto.altura,
+    foto: estado.foto ? estado.foto.blob : null, // a foto é opcional
+    fotoLargura: estado.foto ? estado.foto.largura : null,
+    fotoAltura: estado.foto ? estado.foto.altura : null,
     versao: Date.now(),
   };
   try {
@@ -1016,8 +1030,6 @@ function seguirPosicao() {
   }, err => {
     if (err.code === 3) return; // continua esperando o GPS
     pararPosicao();
-    $('mapaAviso').textContent = err.code === 1 ? 'Permissão de localização negada: a sua posição não aparece no mapa.'
-      : 'Não foi possível obter a sua posição agora.';
   }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 });
 }
 function pararPosicao() {
@@ -1036,14 +1048,12 @@ function abrirMapa() {
   $('modalMapa').hidden = false;
   prepararMapa();
   mapa.invalidateSize();
-  if (!navigator.onLine) $('mapaAviso').textContent += ' Sem internet: só aparecem as áreas do mapa já vistas antes.';
 }
 
 $('btnMapa').addEventListener('click', () => {
   escolhendoPonto = true;
   abrirMapa();
   camadaPontos.clearLayers();
-  $('mapaAviso').textContent = redesNoMapa().length ? 'Toque no mapa, arraste o marcador ou toque num equipamento.' : 'Toque no mapa ou arraste o marcador.';
   $('btnConfirmarMapa').hidden = false;
   const lat = numero($('fLat').value), lon = numero($('fLon').value);
   const temPonto = lat !== null && lon !== null;
@@ -1074,8 +1084,6 @@ $('btnMapaInsp').addEventListener('click', async () => {
   if (marcador) marcador.remove();
   camadaPontos.clearLayers();
   $('btnConfirmarMapa').hidden = true;
-  $('mapaAviso').textContent = `Alim. ${estado.inspecao.alimentador}: ${regs.length} ${regs.length === 1 ? 'registro' : 'registros'}.` +
-    (carregadas().length ? ' No botão de camadas, ligue ou desligue alimentadores e equipamentos.' : ' Use “+ Alimentador” para carregar a rede.');
   $('mapaCoords').textContent = '';
   const pts = regs.map((r, i) => {
     const popup = document.createElement('div');
@@ -1116,7 +1124,7 @@ function tabelaCsv(regs, insp) {
   const cel = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
   const cab = ['Nº', 'Alimentador', 'Tipo de irregularidade', 'Descrição', 'Data/hora', 'Latitude', 'Longitude', 'Precisão GPS (m)', 'Arquivo da foto'];
   const linhas = regs.map((r, i) => [i + 1, r.alimentador || insp.alimentador, r.tipo, r.descricao, fmt(r.dataHora),
-    r.lat.toFixed(6).replace('.', ','), r.lon.toFixed(6).replace('.', ','), r.precisao ? Math.round(r.precisao) : '', nomeFoto(r, i + 1)]);
+    r.lat.toFixed(6).replace('.', ','), r.lon.toFixed(6).replace('.', ','), r.precisao ? Math.round(r.precisao) : '', r.foto ? nomeFoto(r, i + 1) : 'sem foto']);
   // ";" e BOM para o Excel em português abrir com acentos e colunas certas.
   return new Blob(['\ufeff' + [cab, ...linhas].map(l => l.map(cel).join(';')).join('\r\n')], { type: 'text/csv' });
 }
@@ -1133,10 +1141,11 @@ async function sincronizarAgora(id, refazer) {
     ant.fotos = {};
   }
   const desejado = {};
-  regs.forEach((r, i) => { desejado[nomeFoto(r, i + 1)] = `${r.id}:${r.versao || 0}`; });
+  regs.forEach((r, i) => { if (r.foto) desejado[nomeFoto(r, i + 1)] = `${r.id}:${r.versao || 0}`; });
   for (const item of await Pastas.listar(`${Pastas.FOTOS}/${pasta}`))
     if (!(item.nome in desejado)) await Pastas.remover(`${Pastas.FOTOS}/${pasta}/${item.nome}`);
   for (const [i, r] of regs.entries()) {
+    if (!r.foto) continue;
     const nome = nomeFoto(r, i + 1);
     if (ant.fotos[nome] !== desejado[nome]) await Pastas.gravar(`${Pastas.FOTOS}/${pasta}/${nome}`, r.foto);
   }
@@ -1237,7 +1246,7 @@ const blobParaDataUrl = b => new Promise(ok => { const fr = new FileReader(); fr
 $('btnExportar').addEventListener('click', async () => {
   const inspecoes = await DB.todos('inspecoes');
   const registros = [];
-  for (const r of await DB.todos('registros')) registros.push({ ...r, foto: await blobParaDataUrl(r.foto) });
+  for (const r of await DB.todos('registros')) registros.push({ ...r, foto: r.foto ? await blobParaDataUrl(r.foto) : null });
   const d = new Date();
   const nome = `backup_inspecoes_${d.toISOString().slice(0, 10)}.json`;
   baixar(new Blob([JSON.stringify({ app: 'inspecao-redes', versao: 2, inspecoes, registros })], { type: 'application/json' }), nome);
@@ -1257,7 +1266,7 @@ $('inpImportar').addEventListener('change', async e => {
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       return new Blob([bytes], { type: cab.slice(5).split(';')[0] });
     };
-    for (const r of dados.registros) await DB.salvar('registros', { ...r, foto: dataUrlParaBlob(r.foto) });
+    for (const r of dados.registros) await DB.salvar('registros', { ...r, foto: r.foto ? dataUrlParaBlob(r.foto) : null });
     for (const i of dados.inspecoes) sincronizar(i.id, true);
     avisar(`Backup importado: ${dados.inspecoes.length} inspeções, ${dados.registros.length} registros.`);
     telaInicio();

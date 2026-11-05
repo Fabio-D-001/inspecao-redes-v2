@@ -124,12 +124,13 @@
       </div>
 
       <div class="campo">
-        <label>Imagem/foto *</label>
+        <label>Imagem/foto (opcional)</label>
         <div class="linha">
           <label class="btn primario">Tirar foto<input id="fCamera" type="file" accept="image/*" capture="environment" hidden></label>
           <label class="btn">Da galeria<input id="fGaleria" type="file" accept="image/*" hidden></label>
         </div>
         <img id="fPreview" class="preview" alt="Pré-visualização da foto" hidden>
+        <button type="button" id="btnRemoverFoto" class="btn pequeno perigo" hidden>Remover foto</button>
       </div>
 
       <p id="erroForm" class="erro" hidden></p>
@@ -142,7 +143,7 @@
 <!-- Mapa (tela cheia) -->
 <div id="modalMapa" class="modal" hidden>
   <div class="modal-topo">
-    <span id="mapaAviso">Toque no mapa ou arraste o marcador.</span>
+    <span></span>
     <button id="btnFecharMapa" class="btn pequeno">Fechar</button>
   </div>
   <div id="mapa"></div>

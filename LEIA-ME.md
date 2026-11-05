@@ -33,8 +33,10 @@ A versão 2.0 parte da 1.0 (pasta `app/`, que continua publicada e sem alteraç�
 - **Dados separados**: a 2.0 guarda os seus dados num banco próprio (`inspecao-redes-v2`) e na pasta `InspecaoRedes2/`. Assim ela não interfere na 1.0, que fica no mesmo endereço do github.io. Em "Backup dos dados", o botão **Copiar inspeções da versão 1.0** traz para cá as inspeções da 1.0 que estiverem no aparelho. Os backups .json das duas versões são compatíveis.
 
 ## Uso
-1. **Nova inspeção**: escolha a distribuidora, o alimentador e a qualidade das fotos no relatório. A qualidade pode ser baixa (cerca de 0,1 MB por foto), média (0,35 MB) ou alta (0,7 MB). Tudo isso pode ser trocado depois em "Alterar".
-2. **Novo registro**: preencha alimentador, tipo de irregularidade, descrição, data/hora, localização e foto.
+1. **Nova inspeção**: escolha a distribuidora, o alimentador e a qualidade das fotos no relatório. A qualidade pode ser baixa (cerca de 0,1 MB por foto), média (0,3 MB) ou alta (1 MB). Tudo isso pode ser trocado depois em "Alterar".
+   - Ao lado da qualidade aparece o máximo de registros com foto para o relatório ficar com até 25 MB, o limite comum de anexo de e-mail: cerca de 240 na baixa, 80 na média e 24 na alta. É uma estimativa pelo tamanho médio das fotos. Se a inspeção passar desse número, o aviso fica em vermelho.
+2. **Novo registro**: preencha alimentador, tipo de irregularidade, descrição, data/hora, localização e, se quiser, a foto.
+   - **A foto é opcional.** Um registro sem foto aparece no relatório como "Registro N (sem foto)", com um quadro vazio no lugar da imagem, e entra no .kmz e na tabela de registros. "Remover foto" tira a foto de um registro.
    - A localização vem do GPS, que continua buscando até a precisão ficar abaixo de 5 m. Também dá para digitá-la ou escolhê-la no mapa, com a rede.
 3. **Relatório .docx / .pdf**: **Compartilhar** ou **Salvar no aparelho**.
 4. **Pastas do app**: `Relatorios/`, `Registros/` (um .csv por inspeção) e `Fotos/`. **Exportar tudo (.zip)** leva as pastas para Downloads.
@@ -60,6 +62,9 @@ A versão 2.0 parte da 1.0 (pasta `app/`, que continua publicada e sem alteraç�
 Publicado no GitHub Pages, em https e num repositório próprio, separado da 1.0. Ao publicar uma nova versão, altere `VERSAO` em `sw.js`.
 
 Os caches do service worker começam com `v2-`, porque as duas versões estão no mesmo domínio (fabio-d-001.github.io). Se a 1.0 for atualizada um dia, o service worker dela apaga os caches que não são dela. Nesse caso, a 2.0 baixa tudo de novo na próxima abertura com internet.
+
+## Mapa
+O mapa ocupa a tela toda, sem mensagens no topo: só o botão Fechar.
 
 ## Mapa offline
 O mapa de fundo (OpenStreetMap / satélite Esri) precisa de internet. As áreas já vistas ficam guardadas.

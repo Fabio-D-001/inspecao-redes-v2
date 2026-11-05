@@ -169,3 +169,8 @@ h2 { color: var(--laranja-escuro); }
 .leaflet-control-layers .tirar-rede { margin-left: 6px; font-size: 12px; color: var(--perigo); text-decoration: underline; }
 .leaflet-control-layers .titulo-camadas { display: block; margin: 6px 0 2px; font-size: 12px; color: var(--suave); text-transform: uppercase; letter-spacing: .04em; }
 .leaflet-bar a.btn-alim { width: auto; padding: 0 10px; font: 600 13px/30px system-ui, sans-serif; color: #333; white-space: nowrap; }
+/* Versão 2.3: registros sem foto */
+.registros .sem-foto { display: flex; align-items: center; justify-content: center; width: 64px; height: 64px; flex: none;
+  border: 1px dashed var(--borda); border-radius: 6px; font-size: 11px; color: var(--suave); text-align: center; }
+#btnRemoverFoto { margin-top: 8px; }
+.alim small.erro-texto { color: var(--perigo); }

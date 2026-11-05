@@ -17,7 +17,8 @@ const Relatorio = (() => {
     const desc = (reg.descricao || '').trim().replace(/\.+$/, '');
     const corpo = (desc ? `${reg.tipo}, ${desc}.` : `${reg.tipo}.`) +
       ` (${coord(reg.lat)}, ${coord(reg.lon)})`;
-    return { negrito: `Foto ${n} - Alim. ${reg.alimentador || alimentador}: `, normal: corpo };
+    const rotulo = reg.foto ? `Foto ${n}` : `Registro ${n} (sem foto)`;
+    return { negrito: `${rotulo} - Alim. ${reg.alimentador || alimentador}: `, normal: corpo };
   }
 
   function distanciaKm(a, b) {
@@ -48,6 +49,7 @@ const Relatorio = (() => {
     const porTipo = contar(r => r.tipo).sort((a, b) => b[1] - a[1] || tipos.indexOf(a[0]) - tipos.indexOf(b[0]));
     const porAlim = contar(r => r.alimentador || alimPadrao).sort((a, b) => b[1] - a[1]);
     const total = regs.length;
+    const semFoto = regs.filter(r => !r.foto).length;
 
     const L = [
       ['titulo', 'ESTATÍSTICAS DA INSPEÇÃO'],
@@ -58,6 +60,7 @@ const Relatorio = (() => {
       ['nota', '(Soma das distâncias em linha reta entre registros consecutivos, em ordem de data/hora)'],
       ['espaco'],
       ['secao', `Irregularidades encontradas: ${qtd(total)} de ${porTipo.length} ${porTipo.length === 1 ? 'tipo' : 'tipos'}`],
+      ...(semFoto ? [['nota', `(${semFoto === 1 ? '1 registro sem foto' : `${semFoto} registros sem foto`})`]] : []),
       ['espaco'],
       ['secao', 'Resumo por Tipo:'],
       ...porTipo.map(([t, n]) => ['item', ` • ${t}: ${qtd(n)} (${pct(n, total)})`]),
@@ -69,13 +72,18 @@ const Relatorio = (() => {
 
   // Qualidade das fotos no relatório (escolhida na inspeção). O app guarda as fotos em
   // alta e reduz na hora de gerar, então dá para trocar a qualidade depois.
+  // maxRegistros: fotos que cabem num relatório de LIMITE_MB (limite comum de anexo de e-mail), pelo
+  // tamanho médio da foto, deixando ~1 MB para o restante do arquivo.
+  const LIMITE_MB = 25;
   const QUALIDADES = {
-    baixa: { rotulo: 'Baixa', max: 1024, q: 0.6, dica: 'arquivo leve, bom para WhatsApp (~0,1 MB por foto)' },
-    media: { rotulo: 'Média', max: 1600, q: 0.75, dica: 'equilíbrio entre nitidez e tamanho (~0,3 MB por foto)' },
-    alta: { rotulo: 'Alta', max: 2400, q: 0.88, dica: 'máximo de detalhe, arquivo grande (~1 MB por foto)' },
+    baixa: { rotulo: 'Baixa', max: 1024, q: 0.6, mb: 0.1, dica: 'arquivo leve, bom para WhatsApp (~0,1 MB por foto)' },
+    media: { rotulo: 'Média', max: 1600, q: 0.75, mb: 0.3, dica: 'equilíbrio entre nitidez e tamanho (~0,3 MB por foto)' },
+    alta: { rotulo: 'Alta', max: 2400, q: 0.88, mb: 1, dica: 'máximo de detalhe, arquivo grande (~1 MB por foto)' },
   };
+  for (const q of Object.values(QUALIDADES)) q.maxRegistros = Math.floor((LIMITE_MB - 1) / q.mb);
 
   async function ajustarFoto(r, nivel) {
+    if (!r.foto) return null; // registro sem foto
     const { max, q } = QUALIDADES[nivel] || QUALIDADES.media;
     const larg = r.fotoLargura || 3, alt = r.fotoAltura || 4;
     if (nivel === 'alta' && Math.max(larg, alt) <= max) return { blob: r.foto, largura: larg, altura: alt };
@@ -185,6 +193,10 @@ const Relatorio = (() => {
     const zip = new JSZip();
     let rels = '';
     regs.forEach((r, i) => {
+      if (!fotos[i]) {
+        r._imgXml = run('Registro sem foto', { italico: true, cor: '808080' });
+        return;
+      }
       const rid = `rIdFoto${i + 1}`;
       zip.file(`word/media/foto${i + 1}.jpg`, fotos[i].blob);
       rels += `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/foto${i + 1}.jpg"/>`;
@@ -282,14 +294,20 @@ const Relatorio = (() => {
       for (let i = 0; i < grupo.length; i += 3) {
         const trio = grupo.slice(i, i + 3);
         while (trio.length < 3) trio.push(null);
-        // fotos
-        const altFoto = FOTO_A + 2 * PAD;
+        // fotos (linha baixa quando nenhum dos três tem foto)
+        const altFoto = trio.some(r => r && fotos.get(r)) ? FOTO_A + 2 * PAD : 12;
         for (let k = 0; k < 3; k++) {
           const x = M + k * COL;
           doc.rect(x, y, COL, altFoto);
           const r = trio[k];
           if (!r) continue;
           const foto = fotos.get(r);
+          if (!foto) {
+            doc.setFont('helvetica', 'italic'); doc.setTextColor(128, 128, 128);
+            doc.text('Registro sem foto', x + COL / 2, y + altFoto / 2 + 1, { align: 'center' });
+            doc.setTextColor(0, 0, 0);
+            continue;
+          }
           const [w, h] = caber(foto.largura, foto.altura, FOTO_L, FOTO_A);
           const bytes = new Uint8Array(await foto.blob.arrayBuffer());
           doc.addImage(bytes, 'JPEG', x + (COL - w) / 2, y + PAD, w, h, `foto${p}_${i + k}`, 'FAST');
@@ -346,5 +364,5 @@ const Relatorio = (() => {
     return doc.output('blob');
   }
 
-  return { gerarDocx, gerarPdf, nomeArquivo, formatarDataHora, ajustarFoto, QUALIDADES };
+  return { gerarDocx, gerarPdf, nomeArquivo, formatarDataHora, ajustarFoto, QUALIDADES, LIMITE_MB };
 })();

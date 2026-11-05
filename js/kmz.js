@@ -39,14 +39,15 @@ const Kmz = (() => {
     const marcas = [];
     for (const [i, r] of regs.entries()) {
       const n = i + 1;
-      const foto = `files/fotos/Foto_${String(n).padStart(2, '0')}.jpg`;
-      fotos.push([foto, (await Relatorio.ajustarFoto(r, 'baixa')).blob]);
+      const foto = r.foto ? `files/fotos/Foto_${String(n).padStart(2, '0')}.jpg` : null;
+      if (foto) fotos.push([foto, (await Relatorio.ajustarFoto(r, 'baixa')).blob]);
+      const titulo = foto ? `Foto ${n}` : `Registro ${n} (sem foto)`;
       const alim = r.alimentador || insp.alimentador;
       const linhas = [['Tipo', r.tipo], ['Descrição', r.descricao], ['Alimentador', alim], ['Data/hora', fmt(r.dataHora)],
         ['Coordenadas', `${c6(r.lat)}, ${c6(r.lon)}`], ['Precisão do GPS', r.precisao ? `±${Math.round(r.precisao)} m` : '']];
-      marcas.push(`<Placemark><name>Foto ${n}</name><styleUrl>#registro</styleUrl>` +
-        `<description>${cdata(`<b>Foto ${n} - ${esc(r.tipo)}</b>${tabela(linhas)}<img src="${foto}" width="420">`)}</description>` +
-        dados([['Foto', n], ['Tipo', r.tipo], ['Descricao', r.descricao], ['Alimentador', alim], ['DataHora', fmt(r.dataHora)],
+      marcas.push(`<Placemark><name>${titulo}</name><styleUrl>#registro</styleUrl>` +
+        `<description>${cdata(`<b>${titulo} - ${esc(r.tipo)}</b>${tabela(linhas)}${foto ? `<img src="${foto}" width="420">` : ''}`)}</description>` +
+        dados([['Registro', n], ['Foto', foto ? 'sim' : 'não'], ['Tipo', r.tipo], ['Descricao', r.descricao], ['Alimentador', alim], ['DataHora', fmt(r.dataHora)],
           ['Latitude', c6(r.lat)], ['Longitude', c6(r.lon)], ['PrecisaoGPS_m', r.precisao ? Math.round(r.precisao) : '']]) +
         `<Point><coordinates>${xy(r.lat, r.lon)}</coordinates></Point></Placemark>`);
     }
