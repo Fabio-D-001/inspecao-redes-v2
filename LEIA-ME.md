@@ -15,6 +15,12 @@ A versão 2.0 parte da 1.0 (pasta `app/`, que continua publicada e sem alteraç�
   - reguladores de tensão e bancos de capacitores;
   - postes (só com zoom alto);
   - subestação.
+- **Código dos equipamentos no mapa**: com o mapa bem aproximado (zoom 17 ou mais), cada equipamento das camadas ligadas mostra o seu código: transformadores, chaves, religadores, reguladores, capacitores e subestação. Vale no mapa e no mini-mapa do registro, que agora mostra também os equipamentos. O mini-mapa segue as camadas escolhidas no mapa grande.
+- **Rede de outros alimentadores**: na tela da inspeção, o quadro "Rede no mapa" tem o botão **+ Rede de outro alimentador**, que acrescenta a rede de qualquer alimentador da lista, inclusive de outra distribuidora. **Tirar** remove essa rede, e **Ocultar rede / Mostrar rede** liga e desliga toda a rede nos mapas. Ao usar a posição de um equipamento de outro alimentador num registro, o alimentador do registro passa a ser esse.
+- **Mapa .kmz junto com o relatório**: ao gerar o .docx ou o .pdf, o app gera também `Mapa_Inspecao_<alimentador>_<data>.kmz`, que vai para a pasta Relatórios e é oferecido junto para compartilhar ou salvar. Ele abre no Google Earth, no Google My Maps e no QGIS, e tem:
+  - a pasta "Registros (irregularidades)", com um ponto por foto. Cada ponto traz o tipo, a descrição, o alimentador, a data/hora, as coordenadas e a foto em qualidade baixa. Há também o percurso, desligado ao abrir;
+  - uma pasta para cada rede carregada, com uma subpasta por tipo de equipamento. Os postes vêm desligados ao abrir.
+  - Se o navegador do celular não compartilhar o .kmz, use "Salvar os arquivos em Downloads".
 - **Minha posição no mapa**: o mapa da inspeção mostra a posição atual (ponto azul com o círculo de precisão do GPS). O botão abaixo do zoom centraliza o mapa nela; no "Escolher no mapa" ele também liga o GPS. A busca para quando o mapa fecha.
 - **Escolher camadas**: o botão de camadas, no canto do mapa, liga e desliga cada tipo de equipamento. O app lembra a escolha.
 - **Equipamento no registro**: tocar num equipamento mostra código, potência, fases e estado normal (aberta ou fechada). Ao escolher o ponto de um registro, dá para usar a posição do equipamento e citá-lo na descrição.

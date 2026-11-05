@@ -93,29 +93,38 @@ const Rede = (() => {
 
   const fases = f => (f ? `Fases ${f}` : '');
   const ponto = (x, y) => L.latLng(y, x);
+  const alimDe = d => ['Alimentador', d.nome || d.cod];
 
-  // Itens de cada camada: { ll, titulo, linhas: [[rótulo, valor]] }
+  // Itens de cada camada: { ll, cod, titulo, linhas: [[rótulo, valor]] }
   function itens(d, chave) {
     switch (chave) {
-      case 'trafos': return d.trafos.map(([x, y, kva, f, cod]) => ({ ll: ponto(x, y), titulo: 'Transformador',
-        linhas: [['Código', cod], ['Potência', kva ? `${String(kva).replace('.', ',')} kVA` : ''], ['Ligação', fases(f)]] }));
+      case 'trafos': return d.trafos.map(([x, y, kva, f, cod]) => ({ ll: ponto(x, y), cod, titulo: 'Transformador',
+        linhas: [['Código', cod], ['Potência', kva ? `${String(kva).replace('.', ',')} kVA` : ''], ['Ligação', fases(f)], alimDe(d)] }));
       case 'fusiveis': case 'seccionadoras': case 'religadores':
-        return d.chaves.filter(c => grupoChave(c[2]) === chave).map(([x, y, tip, estado, cod, f]) => ({ ll: ponto(x, y),
+        return d.chaves.filter(c => grupoChave(c[2]) === chave).map(([x, y, tip, estado, cod, f]) => ({ ll: ponto(x, y), cod,
           titulo: TIP_UNID[tip] || `Equipamento de manobra (tipo ${tip})`, aberta: estado === 'A',
-          linhas: [['Código', cod], ['Estado normal', estado === 'A' ? 'Aberta (NA)' : estado === 'F' ? 'Fechada (NF)' : ''], ['Ligação', fases(f)]] }));
-      case 'reguladores': return d.reguladores.map(([x, y, cod, f]) => ({ ll: ponto(x, y), titulo: 'Regulador de tensão',
-        linhas: [['Código', cod], ['Ligação', fases(f)]] }));
-      case 'capacitores': return d.capacitores.map(([x, y, cod, f]) => ({ ll: ponto(x, y), titulo: 'Banco de capacitores',
-        linhas: [['Código', cod], ['Ligação', fases(f)]] }));
-      case 'sub': return d.subPt ? [{ ll: ponto(d.subPt[0], d.subPt[1]), titulo: 'Subestação',
+          linhas: [['Código', cod], ['Estado normal', estado === 'A' ? 'Aberta (NA)' : estado === 'F' ? 'Fechada (NF)' : ''], ['Ligação', fases(f)], alimDe(d)] }));
+      case 'reguladores': return d.reguladores.map(([x, y, cod, f]) => ({ ll: ponto(x, y), cod, titulo: 'Regulador de tensão',
+        linhas: [['Código', cod], ['Ligação', fases(f)], alimDe(d)] }));
+      case 'capacitores': return d.capacitores.map(([x, y, cod, f]) => ({ ll: ponto(x, y), cod, titulo: 'Banco de capacitores',
+        linhas: [['Código', cod], ['Ligação', fases(f)], alimDe(d)] }));
+      case 'sub': return d.subPt ? [{ ll: ponto(d.subPt[0], d.subPt[1]), cod: d.sub, titulo: 'Subestação',
         linhas: [['Nome', d.subNome], ['Sigla', d.sub]] }] : [];
       default: return [];
     }
   }
 
-  // Monta as camadas de um alimentador para o mapa "m". aoTocar(item) recebe o equipamento tocado.
-  // Devolve [{ chave, rotulo (HTML com a cor), camada, visivel }], só das camadas com algo.
-  function camadas(m, d, { aoTocar = null, interativo = true, so = null } = {}) {
+  // Linhas de uma camada de rede como listas de L.latLng.
+  const linhas = (d, chave) => (d[chave] || []).map(coords => {
+    const lls = [];
+    for (let i = 0; i < coords.length; i += 2) lls.push([coords[i + 1], coords[i]]);
+    return lls;
+  });
+
+  // Monta as camadas dos alimentadores "redes" (lista de dados) para o mapa "m". aoTocar(item) recebe o
+  // equipamento tocado. Devolve [{ chave, rotulo (HTML com a cor), camada, visivel, pontos }], só das
+  // camadas com algo; "pontos" são os equipamentos com código, para os rótulos.
+  function camadas(m, redes, { aoTocar = null, interativo = true, so = null } = {}) {
     if (!m.getPane('postes')) {
       m.createPane('postes').style.zIndex = 390;
       const ajustar = () => { m.getPane('postes').style.display = m.getZoom() >= 16 ? '' : 'none'; };
@@ -127,42 +136,99 @@ const Rede = (() => {
     for (const c of CAMADAS) {
       if (so && !so.includes(c.chave)) continue;
       const grupo = L.featureGroup();
+      const pontos = [];
       let n = 0;
-      if (c.linha) {
-        for (const coords of d[c.chave] || []) {
-          const lls = [];
-          for (let i = 0; i < coords.length; i += 2) lls.push([coords[i + 1], coords[i]]);
-          L.polyline(lls, { renderer: canvas, color: c.cor, weight: c.chave === 'rede3' ? 3 : 2, opacity: 0.85,
-            dashArray: c.chave === 'rede1' ? '6 4' : null, interactive: false }).addTo(grupo);
-          n++;
-        }
-      } else if (c.chave === 'postes') {
-        const p = d.postes || [];
-        for (let i = 0; i < p.length; i += 2) {
-          L.circleMarker([p[i + 1], p[i]], { renderer: canvasPostes, pane: 'postes', radius: c.raio, color: '#fff', weight: 1,
-            fillColor: c.cor, fillOpacity: 1, interactive: false }).addTo(grupo);
-          n++;
-        }
-      } else {
-        for (const it of itens(d, c.chave)) {
-          const mk = L.circleMarker(it.ll, { renderer: canvas, radius: c.raio, color: c.borda || '#fff', weight: c.borda ? 2 : 1,
-            fillColor: it.aberta ? '#fff' : c.cor, fillOpacity: 1, interactive: interativo });
-          if (it.aberta) mk.setStyle({ color: c.cor, weight: 2 });
-          if (interativo && aoTocar) mk.on('click', () => aoTocar(it));
-          mk.addTo(grupo);
-          n++;
+      for (const d of redes) {
+        if (c.linha) {
+          for (const lls of linhas(d, c.chave)) {
+            L.polyline(lls, { renderer: canvas, color: c.cor, weight: c.chave === 'rede3' ? 3 : 2, opacity: 0.85,
+              dashArray: c.chave === 'rede1' ? '6 4' : null, interactive: false }).addTo(grupo);
+            n++;
+          }
+        } else if (c.chave === 'postes') {
+          const p = d.postes || [];
+          for (let i = 0; i < p.length; i += 2) {
+            L.circleMarker([p[i + 1], p[i]], { renderer: canvasPostes, pane: 'postes', radius: c.raio, color: '#fff', weight: 1,
+              fillColor: c.cor, fillOpacity: 1, interactive: false }).addTo(grupo);
+            n++;
+          }
+        } else {
+          for (const it of itens(d, c.chave)) {
+            const mk = L.circleMarker(it.ll, { renderer: canvas, radius: c.raio, color: c.borda || '#fff', weight: c.borda ? 2 : 1,
+              fillColor: it.aberta ? '#fff' : c.cor, fillOpacity: 1, interactive: interativo });
+            if (it.aberta) mk.setStyle({ color: c.cor, weight: 2 });
+            if (interativo && aoTocar) mk.on('click', () => aoTocar(it));
+            mk.addTo(grupo);
+            if (it.cod) pontos.push(it);
+            n++;
+          }
         }
       }
       if (!n) continue;
       const rot = `<span class="leg${c.linha ? ' leg-linha' : ''}" style="background:${c.cor}"></span>${c.rotulo}` +
         (c.linha ? '' : ` <small>(${n})</small>`);
-      saida.push({ chave: c.chave, rotulo: rot, camada: grupo, visivel: visivel(c) });
+      saida.push({ chave: c.chave, rotulo: rot, camada: grupo, visivel: visivel(c), pontos });
     }
     return saida;
   }
 
-  // Limites do alimentador para o mapa.
-  const limites = d => L.latLngBounds([d.bbox[1], d.bbox[0]], [d.bbox[3], d.bbox[2]]);
+  // Rótulos com o código dos equipamentos das camadas ligadas, só com zoom alto e só na área visível
+  // (são milhares de equipamentos). Devolve uma função que tira os rótulos e para de acompanhar o mapa.
+  const ZOOM_ROTULOS = 17, MAX_ROTULOS = 300;
+  function rotulos(m, lista) {
+    if (!m.getPane('rotulos')) {
+      const p = m.createPane('rotulos');
+      p.style.zIndex = 450;
+      p.style.pointerEvents = 'none';
+    }
+    const grupo = L.layerGroup().addTo(m);
+    const atualizar = () => {
+      grupo.clearLayers();
+      if (m.getZoom() < ZOOM_ROTULOS) return;
+      const area = m.getBounds().pad(0.1);
+      let n = 0;
+      for (const c of lista) {
+        if (!m.hasLayer(c.camada)) continue;
+        for (const it of c.pontos) {
+          if (n >= MAX_ROTULOS) return;
+          if (!area.contains(it.ll)) continue;
+          const el = document.createElement('span');
+          el.textContent = it.cod;
+          L.marker(it.ll, { pane: 'rotulos', interactive: false, keyboard: false,
+            icon: L.divIcon({ className: 'rotulo-equip', html: el.outerHTML, iconSize: null, iconAnchor: [-8, 8] }) }).addTo(grupo);
+          n++;
+        }
+      }
+    };
+    m.on('moveend overlayadd overlayremove', atualizar);
+    m.whenReady(atualizar); // o mapa pode ainda não ter posição (primeira abertura)
+    return () => { m.off('moveend overlayadd overlayremove', atualizar); grupo.remove(); };
+  }
 
-  return { distribuidoras, alimentadores, rotulo, filtrar, igual, dados, camadas, limites, lembrar };
+  // Limites de um ou mais alimentadores para o mapa.
+  const limites = redes => {
+    const b = L.latLngBounds([]);
+    for (const d of [].concat(redes)) b.extend([[d.bbox[1], d.bbox[0]], [d.bbox[3], d.bbox[2]]]);
+    return b;
+  };
+
+  // Conteúdo de um alimentador para exportar (KMZ): [{ chave, rotulo, cor, borda, linhas | pontos | postes }].
+  function exportar(d) {
+    const saida = [];
+    for (const c of CAMADAS) {
+      const item = { chave: c.chave, rotulo: c.rotulo.replace(/ \(.*\)$/, ''), cor: c.cor, borda: c.borda || null };
+      if (c.linha) item.linhas = linhas(d, c.chave);
+      else if (c.chave === 'postes') {
+        const p = d.postes || [];
+        item.postes = [];
+        for (let i = 0; i < p.length; i += 2) item.postes.push([p[i + 1], p[i]]);
+      } else item.pontos = itens(d, c.chave);
+      const n = (item.linhas || item.postes || item.pontos).length;
+      if (n) saida.push(item);
+    }
+    return saida;
+  }
+
+  return { distribuidoras, alimentadores, rotulo, filtrar, igual, dados, camadas, rotulos, limites, exportar, lembrar,
+    visivelChave: chave => visivel(CAMADAS.find(c => c.chave === chave)) };
 })();

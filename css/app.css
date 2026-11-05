@@ -159,3 +159,18 @@ h2 { color: var(--laranja-escuro); }
 .leaflet-bar a.btn-posicao.buscando { color: #888; animation: piscar 1s infinite; }
 .leaflet-bar a.btn-posicao.ativo { color: #1a73e8; }
 @keyframes piscar { 50% { opacity: .4; } }
+/* Versão 2.1: redes no mapa, rótulos dos equipamentos e vários arquivos no diálogo */
+.redes { display: flex; flex-direction: column; gap: 8px; }
+.redes-topo { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lista-redes { list-style: none; margin: 0; padding: 0; }
+.lista-redes li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0;
+  border-top: 1px solid var(--borda); }
+.lista-redes li:first-child { border-top: 0; }
+.lista-redes .info { min-width: 0; }
+.lista-redes strong { display: block; }
+.lista-redes small { color: var(--suave); display: block; }
+#btnRedeOutra { align-self: flex-start; }
+.rede-status[hidden] { display: none; }
+.rotulo-equip span { display: inline-block; white-space: nowrap; font: 600 11px/1.2 system-ui, sans-serif; color: #1b1b1b;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff; }
+.nome-arquivo { white-space: pre-line; }

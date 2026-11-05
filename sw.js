@@ -1,7 +1,7 @@
 // Service worker: guarda o aplicativo para uso offline, as áreas do mapa já visitadas e a rede
 // dos alimentadores já abertos. Os nomes dos caches começam com "v2-" porque a versão 1.0 usa o
 // mesmo endereço (github.io) e o mesmo armazenamento de caches.
-const VERSAO = '2.0.1';
+const VERSAO = '2.1.0';
 const APP = `v2-app-${VERSAO}`;
 const MAPA = 'v2-mapa-tiles';
 const DADOS = 'v2-dados-2025';
@@ -10,7 +10,7 @@ const MAX_ALIMENTADORES = 400;
 
 const ARQUIVOS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css', 'dados/distribuidoras.json',
-  'js/dialogo.js', 'js/db.js', 'js/pastas.js', 'js/relatorio.js', 'js/rede.js', 'js/app.js',
+  'js/dialogo.js', 'js/db.js', 'js/pastas.js', 'js/relatorio.js', 'js/rede.js', 'js/kmz.js', 'js/app.js',
   'vendor/jszip.min.js', 'vendor/jspdf.umd.min.js',
   'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css',
   'vendor/leaflet/images/marker-icon.png', 'vendor/leaflet/images/marker-icon-2x.png',
@@ -19,7 +19,9 @@ const ARQUIVOS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(APP).then(c => c.addAll(ARQUIVOS)).then(() => self.skipWaiting()));
+  // cache: 'reload' busca no servidor, sem a cópia do cache HTTP: a versão nova não fica com arquivos antigos.
+  e.waitUntil(caches.open(APP).then(c => c.addAll(ARQUIVOS.map(u => new Request(u, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {

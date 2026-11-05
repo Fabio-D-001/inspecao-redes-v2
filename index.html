@@ -50,9 +50,17 @@
         <small>Alimentador</small>
         <strong id="alimAtual"></strong>
         <small id="qualidadeAtual"></small>
-        <small id="redeStatus" class="rede-status"></small>
       </div>
       <button id="btnEditarAlim" class="btn pequeno">Alterar</button>
+    </div>
+    <div id="blocoRedes" class="cartao redes" hidden>
+      <div class="redes-topo">
+        <strong>Rede no mapa</strong>
+        <button id="btnRedeVer" class="btn pequeno">Ocultar rede</button>
+      </div>
+      <ul id="listaRedes" class="lista-redes"></ul>
+      <small id="redeStatus" class="rede-status"></small>
+      <button id="btnRedeOutra" class="btn pequeno">+ Rede de outro alimentador</button>
     </div>
     <button id="btnNovoRegistro" class="btn primario grande">+ Novo registro</button>
     <div class="linha">
@@ -162,9 +170,11 @@
     <input id="dlgAlimInput" type="text" autocomplete="off" placeholder="Digite o nome, código ou subestação" required>
     <ul id="dlgAlimLista" class="sugestoes" hidden></ul>
     <small id="dlgAlimDica" class="dica"></small>
-    <label for="dlgQualidade" class="espaco-acima">Qualidade das fotos no relatório</label>
-    <select id="dlgQualidade"></select>
-    <small id="dlgQualidadeDica" class="dica"></small>
+    <div id="dlgBlocoQualidade">
+      <label for="dlgQualidade" class="espaco-acima">Qualidade das fotos no relatório</label>
+      <select id="dlgQualidade"></select>
+      <small id="dlgQualidadeDica" class="dica"></small>
+    </div>
     <div class="linha fim">
       <button type="button" class="btn" onclick="this.closest('dialog').close('cancelar')">Cancelar</button>
       <button value="ok" id="dlgAlimOk" class="btn primario">Iniciar</button>
@@ -207,6 +217,7 @@
 <script src="js/pastas.js"></script>
 <script src="js/relatorio.js"></script>
 <script src="js/rede.js"></script>
+<script src="js/kmz.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

@@ -346,5 +346,5 @@ const Relatorio = (() => {
     return doc.output('blob');
   }
 
-  return { gerarDocx, gerarPdf, nomeArquivo, formatarDataHora, QUALIDADES };
+  return { gerarDocx, gerarPdf, nomeArquivo, formatarDataHora, ajustarFoto, QUALIDADES };
 })();

@@ -31,7 +31,9 @@ const estado = {
   coordsManual: false, // usuário escolheu no mapa ou digitou: o GPS não sobrescreve
   gpsWatch: null,
   urls: [],            // object URLs das miniaturas, liberadas ao redesenhar
-  rede: null,          // dados da rede do alimentador da inspeção aberta (BDGD), quando carregados
+  redes: [],           // redes (BDGD) da inspeção aberta: [{ distribuidora, circuito, extra, d }], d = dados ou null
+  redesDe: null,       // id da inspeção a que estado.redes se refere
+  redesCarregando: false,
   nRegistros: 0,
 };
 
@@ -173,7 +175,7 @@ $('dlgQualidade').addEventListener('change', dicaQualidade);
 
 // Distribuidora e alimentador: a lista vem da BDGD da ANEEL (pasta dados/). Sem internet e sem a lista
 // guardada, o alimentador pode ser digitado; nesse caso a rede não aparece no mapa.
-const escolha = { lista: null, alim: null, avisouFora: false };
+const escolha = { lista: null, alim: null, avisouFora: false, soRede: false };
 
 async function prepararDistribuidoras() {
   const sel = $('dlgDist');
@@ -271,6 +273,11 @@ $('dlgAlimOk').addEventListener('click', () => {
   if (temLista && !$('dlgDist').value) { dicaAlim('Escolha a distribuidora.', 'erro'); $('dlgDist').focus(); return; }
   if (!v) { dicaAlim('Informe o alimentador.', 'erro'); $('dlgAlimInput').focus(); return; }
   escolherDigitado();
+  if (escolha.soRede && !escolha.alim) {
+    dicaAlim(escolha.lista ? 'Escolha um alimentador da lista: só assim a rede pode ser carregada.'
+      : 'Sem a lista de alimentadores (sem internet) não dá para carregar outra rede agora.', 'erro');
+    return;
+  }
   if (!escolha.alim && escolha.lista && !escolha.avisouFora) {
     escolha.avisouFora = true;
     dicaAlim('Este alimentador não está na lista da ANEEL, então a rede não aparecerá no mapa. Toque de novo para continuar assim, ou escolha um da lista.', 'erro');
@@ -280,8 +287,11 @@ $('dlgAlimOk').addEventListener('click', () => {
 });
 
 // Pergunta distribuidora, alimentador e qualidade das fotos; devolve os dados da inspeção ou null.
-function perguntarInspecao(titulo, { alimentador = '', qualidade = 'media', distribuidora = null, circuito = null } = {}, botao = 'Iniciar') {
+// Com "soRede", só escolhe um alimentador da lista (para carregar a rede dele) e não pergunta a qualidade.
+function perguntarInspecao(titulo, { alimentador = '', qualidade = 'media', distribuidora = null, circuito = null, soRede = false } = {}, botao = 'Iniciar') {
   const dlg = $('dlgAlim');
+  escolha.soRede = soRede;
+  $('dlgBlocoQualidade').hidden = soRede;
   $('dlgAlimTitulo').textContent = titulo;
   $('dlgAlimOk').textContent = botao;
   $('dlgAlimInput').value = alimentador;
@@ -337,45 +347,106 @@ async function registrosOrdenados(inspecaoId) {
   return (await DB.registrosDe(inspecaoId)).sort((a, b) => a.dataHora - b.dataHora);
 }
 
-const atualizarBotaoMapa = () => { $('btnMapaInsp').disabled = !estado.nRegistros && !estado.rede; };
+// Redes que aparecem nos mapas: as carregadas, a não ser que a pessoa tenha ocultado a rede.
+const redesNoMapa = () => (estado.inspecao && estado.inspecao.redeOculta ? [] : estado.redes.filter(r => r.d).map(r => r.d));
+const atualizarBotaoMapa = () => { $('btnMapaInsp').disabled = !estado.nRegistros && !redesNoMapa().length; };
 
-// Carrega a rede do alimentador (com internet, ou da cópia guardada pelo app).
+// Alimentadores cuja rede a inspeção mostra: o da inspeção e os acrescentados por "Rede de outro alimentador".
+const circuitosDe = insp => [].concat(
+  insp.circuito && insp.distribuidora ? [{ distribuidora: insp.distribuidora, circuito: insp.circuito, extra: false }] : [],
+  (insp.redesExtras || []).map(r => ({ distribuidora: r.distribuidora, circuito: r.circuito, extra: true })));
+const mesmoCircuito = (a, b) => a.distribuidora.id === b.distribuidora.id && a.circuito.arq === b.circuito.arq;
+
+// Carrega as redes (com internet, ou da cópia guardada pelo app).
 async function carregarRede(insp) {
-  estado.rede = null;
-  atualizarBotaoMapa();
-  const st = $('redeStatus');
-  const status = (txt, classe = '') => { st.textContent = txt; st.className = 'rede-status ' + classe; };
-  if (MODO_ARTEFATO || !insp.circuito || !insp.distribuidora) {
-    status(insp.distribuidora && !insp.circuito ? 'Alimentador fora da lista da ANEEL: sem rede no mapa.' : '');
-    return;
-  }
-  status('Carregando a rede do alimentador…');
-  try {
-    const d = await Rede.dados(insp.distribuidora.id, insp.circuito.arq);
-    if (!estado.inspecao || estado.inspecao.id !== insp.id) return;
-    estado.rede = d;
-    const n = (v, s, p) => `${v.length} ${v.length === 1 ? s : p}`;
-    status(`Rede no mapa: ${n(d.trafos, 'transformador', 'transformadores')}, ${n(d.chaves, 'chave', 'chaves')} (BDGD/ANEEL).`, 'ok');
-  } catch (e) {
-    if (!estado.inspecao || estado.inspecao.id !== insp.id) return;
-    status(navigator.onLine ? 'Não foi possível carregar a rede do alimentador.' : 'Sem internet: a rede do alimentador aparece no mapa quando houver conexão.', 'erro');
-  }
-  atualizarBotaoMapa();
+  estado.redesDe = insp.id;
+  estado.redes = MODO_ARTEFATO ? [] : circuitosDe(insp).map(r => ({ ...r, d: null }));
+  estado.redesCarregando = estado.redes.length > 0;
+  desenharRedes();
+  if (!estado.redesCarregando) return;
+  const res = await Promise.all(estado.redes.map(r => Rede.dados(r.distribuidora.id, r.circuito.arq)
+    .then(d => ({ ...r, d }), () => ({ ...r, d: null }))));
+  if (!estado.inspecao || estado.inspecao.id !== insp.id || estado.redesDe !== insp.id) return;
+  estado.redes = res;
+  estado.redesCarregando = false;
+  desenharRedes();
 }
 addEventListener('online', () => {
-  if (estado.inspecao && !estado.rede && !$('telaInspecao').hidden) carregarRede(estado.inspecao);
+  if (estado.inspecao && estado.redes.some(r => !r.d) && !$('telaInspecao').hidden) carregarRede(estado.inspecao);
 });
+
+// Quadro "Rede no mapa" da tela da inspeção.
+function desenharRedes() {
+  const insp = estado.inspecao;
+  const st = $('redeStatus');
+  const status = (txt, classe = '') => { st.textContent = txt; st.className = 'rede-status ' + classe; st.hidden = !txt; };
+  $('blocoRedes').hidden = MODO_ARTEFATO || !insp.distribuidora;
+  $('btnRedeVer').textContent = insp.redeOculta ? 'Mostrar rede' : 'Ocultar rede';
+  $('btnRedeVer').hidden = !estado.redes.length;
+  const n = (v, s, p) => `${v.length} ${v.length === 1 ? s : p}`;
+  $('listaRedes').replaceChildren(...estado.redes.map((r, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = '<div class="info"><strong></strong><small></small></div>';
+    li.querySelector('strong').textContent = Rede.rotulo(r.circuito) + (r.extra ? '' : ' (da inspeção)');
+    li.querySelector('small').textContent = r.d ? `${n(r.d.trafos, 'transformador', 'transformadores')}, ${n(r.d.chaves, 'chave', 'chaves')}` +
+      (r.distribuidora.id !== insp.distribuidora.id ? ` · ${r.distribuidora.nome}` : '')
+      : estado.redesCarregando ? 'Carregando…' : navigator.onLine ? 'Não foi possível carregar.' : 'Sem internet: carrega quando houver conexão.';
+    if (r.extra) {
+      const x = document.createElement('button');
+      x.className = 'btn pequeno';
+      x.textContent = 'Tirar';
+      x.setAttribute('aria-label', `Tirar a rede do alimentador ${Rede.rotulo(r.circuito)}`);
+      x.addEventListener('click', () => tirarRede(i));
+      li.appendChild(x);
+    }
+    return li;
+  }));
+  if (!insp.distribuidora) status('');
+  else if (!estado.redes.length) status(insp.circuito ? '' : 'Alimentador da inspeção fora da lista da ANEEL: sem rede no mapa.');
+  else if (insp.redeOculta) status('Rede oculta: não aparece nos mapas nem no mini-mapa.');
+  else if (estado.redesCarregando) status('Carregando a rede…');
+  else status(estado.redes.every(r => r.d) ? 'Rede nos mapas (BDGD/ANEEL). Toque num equipamento para ver os dados.' : '', 'ok');
+  atualizarBotaoMapa();
+}
+
+async function salvarInspecao(campos) {
+  const insp = { ...(await DB.obter('inspecoes', estado.inspecao.id)), ...campos };
+  await DB.salvar('inspecoes', insp);
+  estado.inspecao = insp;
+  return insp;
+}
+
+$('btnRedeVer').addEventListener('click', async () => {
+  await salvarInspecao({ redeOculta: !estado.inspecao.redeOculta });
+  desenharRedes();
+});
+
+$('btnRedeOutra').addEventListener('click', async () => {
+  const i = estado.inspecao;
+  const dados = await perguntarInspecao('Rede de outro alimentador', { distribuidora: i.distribuidora || null, soRede: true }, 'Carregar rede');
+  if (!dados || !dados.circuito) return;
+  const novo = { distribuidora: dados.distribuidora, circuito: dados.circuito };
+  if (circuitosDe(estado.inspecao).some(r => mesmoCircuito(r, novo))) { avisar('A rede deste alimentador já está na inspeção.'); return; }
+  const insp = await salvarInspecao({ redesExtras: (estado.inspecao.redesExtras || []).concat([novo]), redeOculta: false });
+  carregarRede(insp);
+});
+
+async function tirarRede(indice) {
+  const r = estado.redes[indice];
+  const insp = await salvarInspecao({ redesExtras: (estado.inspecao.redesExtras || []).filter(x => !mesmoCircuito(x, r)) });
+  estado.redes = estado.redes.filter(x => x !== r);
+  if (!estado.redesCarregando) desenharRedes(); else carregarRede(insp);
+}
 
 async function telaInspecao(id) {
   const insp = await DB.obter('inspecoes', id);
   if (!insp) return telaInicio();
-  const mesmaRede = estado.inspecao && estado.inspecao.id === insp.id && estado.rede;
   estado.inspecao = insp;
   mostrar('telaInspecao', `Alim. ${insp.alimentador}`);
   $('distAtual').textContent = insp.distribuidora ? insp.distribuidora.nome : '';
   $('distAtual').hidden = !insp.distribuidora;
   $('alimAtual').textContent = insp.alimentador;
-  if (!mesmaRede) carregarRede(insp);
+  if (estado.redesDe !== insp.id) carregarRede(insp); else desenharRedes();
   $('qualidadeAtual').textContent = `Fotos no relatório: qualidade ${QUALIDADES[qualidadeDe(insp)].rotulo.toLowerCase()}`;
 
   estado.urls.forEach(URL.revokeObjectURL);
@@ -418,7 +489,7 @@ $('btnEditarAlim').addEventListener('click', async () => {
       if (!r.alimentador || r.alimentador === antigo) await DB.salvar('registros', { ...r, alimentador: dados.alimentador, versao: Date.now() });
   await DB.salvar('inspecoes', { ...(await DB.obter('inspecoes', id)), ...dados });
   sincronizar(id);
-  estado.rede = null; // recarrega a rede, que pode ter mudado
+  estado.redesDe = null; // recarrega a rede, que pode ter mudado
   estado.inspecao = null;
   telaInspecao(id);
 });
@@ -443,14 +514,25 @@ async function gerar(tipo) {
       ? await Relatorio.gerarDocx(estado.inspecao, regs, TIPOS)
       : await Relatorio.gerarPdf(estado.inspecao, regs, TIPOS);
     const arquivo = new File([blob], Relatorio.nomeArquivo(estado.inspecao.alimentador, tipo), { type: blob.type || (tipo === 'pdf' ? 'application/pdf' : '') });
+    const arquivos = [arquivo];
+    // Junto com o relatório, o .kmz com a rede carregada e os registros (abre no Google Earth, My Maps, QGIS).
+    try {
+      const kmz = await Kmz.gerar(estado.inspecao, regs, estado.redes.filter(r => r.d).map(r => r.d));
+      arquivos.push(new File([kmz], arquivo.name.replace('Relatorio_Fotografico_', 'Mapa_Inspecao_').replace(/\.\w+$/, '.kmz'), { type: Kmz.TIPO }));
+    } catch (e) {
+      console.error(e);
+      avisar('O relatório foi gerado, mas não foi possível gerar o .kmz: ' + e.message, 6000);
+    }
     let pastaInfo = '';
     if (Pastas.suportado) {
-      try { await Pastas.gravar(`${Pastas.RELATORIOS}/${arquivo.name}`, arquivo); pastaInfo = 'Guardado na pasta Relatórios do app.'; }
-      catch (e) { console.error(e); pastaInfo = 'Não foi possível guardar na pasta Relatórios do app.'; }
+      try {
+        for (const f of arquivos) await Pastas.gravar(`${Pastas.RELATORIOS}/${f.name}`, f);
+        pastaInfo = 'Guardados na pasta Relatórios do app.';
+      } catch (e) { console.error(e); pastaInfo = 'Não foi possível guardar na pasta Relatórios do app.'; }
     }
     const a = estado.inspecao.alimentador;
-    oferecerArquivo(arquivo, {
-      titulo: 'Relatório pronto', pastaInfo,
+    oferecerArquivo(arquivos, {
+      titulo: arquivos.length > 1 ? 'Relatório e mapa (.kmz) prontos' : 'Relatório pronto', pastaInfo,
       compartilhar: { title: `Relatório fotográfico - Alim. ${a}`, text: `Relatório fotográfico da inspeção do alimentador ${a}.` },
     });
   } catch (e) {
@@ -464,35 +546,47 @@ async function gerar(tipo) {
 // depois de preparar o arquivo (a geração pode demorar mais do que o navegador permite).
 const mb = bytes => `${(bytes / 1048576).toFixed(1).replace('.', ',')} MB`;
 let arquivoPronto = null;
-function oferecerArquivo(arquivo, { titulo = 'Arquivo', pastaInfo = '', compartilhar = {}, aoExcluir = null } = {}) {
-  arquivoPronto = { arquivo, compartilhar, aoExcluir };
-  const pode = !MODO_ARTEFATO && !!(navigator.canShare && navigator.canShare({ files: [arquivo] }));
+const podeCompartilhar = files => !MODO_ARTEFATO && !!(navigator.canShare && navigator.canShare({ files }));
+const TEXTO_SEM_COMPARTILHAR = $('semCompartilhar').textContent;
+// "arquivos": um File ou uma lista (relatório + .kmz). Se o navegador não compartilha algum dos tipos
+// (o .kmz, em alguns celulares), compartilha os outros e avisa para salvar esse.
+function oferecerArquivo(arquivos, { titulo = 'Arquivo', pastaInfo = '', compartilhar = {}, aoExcluir = null } = {}) {
+  arquivos = [].concat(arquivos);
+  const compartilhaveis = podeCompartilhar(arquivos) ? arquivos : arquivos.filter(f => podeCompartilhar([f]));
+  const fora = arquivos.filter(f => !compartilhaveis.includes(f));
+  arquivoPronto = { arquivos, compartilhaveis, compartilhar, aoExcluir };
   $('dlgRelTitulo').textContent = titulo;
-  $('dlgRelNome').textContent = `${arquivo.name} (${mb(arquivo.size)})`;
+  $('dlgRelNome').textContent = arquivos.map(f => `${f.name} (${mb(f.size)})`).join('\n');
   $('dlgRelPasta').textContent = pastaInfo;
   $('dlgRelPasta').hidden = !pastaInfo;
-  $('btnCompartilhar').hidden = !pode;
-  $('semCompartilhar').hidden = pode;
+  $('btnCompartilhar').hidden = !compartilhaveis.length;
+  $('semCompartilhar').hidden = !fora.length;
+  $('semCompartilhar').textContent = compartilhaveis.length
+    ? `Este navegador não compartilha ${fora.map(f => f.name.split('.').pop()).map(e => `o .${e}`).join(' e ')}: use “Salvar em Downloads” para ele.`
+    : TEXTO_SEM_COMPARTILHAR;
+  $('btnSalvarRel').textContent = arquivos.length > 1 ? 'Salvar os arquivos em Downloads' : 'Salvar em Downloads';
   $('btnExcluirArq').hidden = !aoExcluir;
   $('dlgRelatorio').showModal();
 }
 
 $('btnCompartilhar').addEventListener('click', async () => {
-  const { arquivo, compartilhar } = arquivoPronto;
+  const { compartilhaveis, compartilhar } = arquivoPronto;
   try {
-    await navigator.share({ files: [arquivo], title: compartilhar.title || arquivo.name, ...(compartilhar.text ? { text: compartilhar.text } : {}) });
-    $('dlgRelatorio').close();
+    await navigator.share({ files: compartilhaveis, title: compartilhar.title || compartilhaveis[0].name, ...(compartilhar.text ? { text: compartilhar.text } : {}) });
+    if (compartilhaveis.length === arquivoPronto.arquivos.length) $('dlgRelatorio').close();
   } catch (e) {
     if (e.name !== 'AbortError') avisar('Não foi possível compartilhar: ' + e.message, 6000);
   }
 });
 $('btnSalvarRel').addEventListener('click', async () => {
   $('dlgRelatorio').close();
-  if (await baixar(arquivoPronto.arquivo, arquivoPronto.arquivo.name)) avisar('Arquivo salvo. Veja na pasta Downloads.');
+  let ok = true;
+  for (const f of arquivoPronto.arquivos) ok = (await baixar(f, f.name)) && ok;
+  if (ok) avisar(arquivoPronto.arquivos.length > 1 ? 'Arquivos salvos. Veja na pasta Downloads.' : 'Arquivo salvo. Veja na pasta Downloads.');
 });
 $('btnExcluirArq').addEventListener('click', async () => {
   $('dlgRelatorio').close();
-  if (!await confirmar(`Excluir ${arquivoPronto.arquivo.name}?`)) return;
+  if (!await confirmar(`Excluir ${arquivoPronto.arquivos[0].name}?`)) return;
   await arquivoPronto.aoExcluir();
 });
 $('btnFecharRel').addEventListener('click', () => $('dlgRelatorio').close());
@@ -669,22 +763,27 @@ function camadasBase(m) {
   return L.control.layers({ 'Ruas': ruas, 'Satélite': satelite }).addTo(m);
 }
 
-// Põe no mapa "m" a rede do alimentador aberto (estado.rede), trocando a anterior. "alvo" guarda o que
+// Põe no mapa "m" as redes da inspeção (redesNoMapa), trocando as anteriores. "alvo" guarda o que
 // está desenhado; com "controle", cada camada vira uma opção que liga/desliga no botão de camadas.
+// Os equipamentos ganham rótulos com o código quando o mapa está bem aproximado.
 function aplicarRede(alvo, m, opcoes, controle) {
-  if (alvo.d === estado.rede) return;
+  const redes = redesNoMapa();
+  const chave = redes.map(d => `${d.dist}/${d.cod}`).join('|');
+  if (alvo.chave === chave) return;
+  if (alvo.tirarRotulos) alvo.tirarRotulos();
   alvo.itens.forEach(c => { if (controle) controle.removeLayer(c.camada); c.camada.remove(); });
-  alvo.d = estado.rede;
-  alvo.itens = estado.rede ? Rede.camadas(m, estado.rede, opcoes) : [];
+  alvo.chave = chave;
+  alvo.itens = redes.length ? Rede.camadas(m, redes, opcoes) : [];
   for (const c of alvo.itens) {
     if (controle) controle.addOverlay(c.camada, c.rotulo);
-    if (c.visivel || !controle) c.camada.addTo(m);
+    if (c.visivel) c.camada.addTo(m);
   }
+  alvo.tirarRotulos = alvo.itens.length ? Rede.rotulos(m, alvo.itens) : null;
 }
 
 // Mini-mapa do formulário: mostra o ponto do registro e o círculo de precisão do GPS.
 let miniMapa, miniMarcador, miniCirculo;
-const miniRede = { d: null, itens: [] };
+const miniRede = { chave: null, itens: [] };
 function mostrarNoMiniMapa(lat, lon, precisao) {
   const el = $('miniMapa');
   const ok = !MODO_ARTEFATO && window.L && lat !== null && lon !== null;
@@ -699,7 +798,13 @@ function mostrarNoMiniMapa(lat, lon, precisao) {
     miniMapa.on('click', () => $('btnMapa').click());
     miniMapa.setView(ll, 18);
   }
-  aplicarRede(miniRede, miniMapa, { interativo: false, so: ['rede3', 'rede1', 'sub'] });
+  aplicarRede(miniRede, miniMapa, { interativo: false,
+    so: ['rede3', 'rede1', 'trafos', 'fusiveis', 'seccionadoras', 'religadores', 'reguladores', 'capacitores', 'sub'] });
+  // segue as camadas escolhidas no mapa grande
+  for (const c of miniRede.itens) {
+    if (!Rede.visivelChave(c.chave)) c.camada.remove();
+    else if (!miniMapa.hasLayer(c.camada)) c.camada.addTo(miniMapa);
+  }
   miniMapa.invalidateSize();
   miniMarcador.setLatLng(ll);
   miniCirculo.setLatLng(ll).setRadius(precisao > 0 ? precisao : 0);
@@ -707,7 +812,7 @@ function mostrarNoMiniMapa(lat, lon, precisao) {
 }
 
 let mapa, marcador, camadaPontos, pontoEscolhido, controleMapa;
-const redeMapa = { d: null, itens: [] };
+const redeMapa = { chave: null, itens: [] };
 let escolhendoPonto = false;
 function prepararMapa() {
   if (!mapa) {
@@ -750,6 +855,12 @@ function mostrarEquipamento(it) {
       marcador.setLatLng(it.ll);
       atualizarPonto(it.ll);
       mapa.closePopup();
+      // equipamento da rede de outro alimentador: o registro passa a ser desse alimentador
+      const alim = (it.linhas.find(l => l[0] === 'Alimentador') || [])[1];
+      if (alim && !Rede.igual(alim, $('fAlim').value)) {
+        $('fAlim').value = alim;
+        avisar(`Alimentador do registro trocado para ${alim}.`);
+      }
     });
     const citar = document.createElement('button');
     citar.className = 'btn';
@@ -840,15 +951,15 @@ $('btnMapa').addEventListener('click', () => {
   escolhendoPonto = true;
   abrirMapa();
   camadaPontos.clearLayers();
-  $('mapaAviso').textContent = estado.rede ? 'Toque no mapa, arraste o marcador ou toque num equipamento.' : 'Toque no mapa ou arraste o marcador.';
+  $('mapaAviso').textContent = redesNoMapa().length ? 'Toque no mapa, arraste o marcador ou toque num equipamento.' : 'Toque no mapa ou arraste o marcador.';
   $('btnConfirmarMapa').hidden = false;
   const lat = numero($('fLat').value), lon = numero($('fLon').value);
   const temPonto = lat !== null && lon !== null;
-  const inicio = temPonto ? L.latLng(lat, lon) : estado.rede ? Rede.limites(estado.rede).getCenter() : L.latLng(-23.5505, -46.6333);
+  const inicio = temPonto ? L.latLng(lat, lon) : redesNoMapa().length ? Rede.limites(redesNoMapa()).getCenter() : L.latLng(-23.5505, -46.6333);
   if (!marcador) marcador = L.marker(inicio, { draggable: true, zIndexOffset: 1000 }).on('drag', e => atualizarPonto(e.target.getLatLng()));
   marcador.setLatLng(inicio).addTo(mapa);
   if (temPonto) mapa.setView(inicio, 18);
-  else if (estado.rede) mapa.fitBounds(Rede.limites(estado.rede), { padding: [20, 20] });
+  else if (redesNoMapa().length) mapa.fitBounds(Rede.limites(redesNoMapa()), { padding: [20, 20] });
   else mapa.setView(inicio, 12);
   atualizarPonto(inicio);
 });
@@ -872,7 +983,7 @@ $('btnMapaInsp').addEventListener('click', async () => {
   camadaPontos.clearLayers();
   $('btnConfirmarMapa').hidden = true;
   $('mapaAviso').textContent = `Alim. ${estado.inspecao.alimentador}: ${regs.length} ${regs.length === 1 ? 'registro' : 'registros'}.` +
-    (estado.rede ? ' Use o botão de camadas para escolher os equipamentos.' : '');
+    (redesNoMapa().length ? ' Use o botão de camadas para escolher os equipamentos.' : '');
   $('mapaCoords').textContent = '';
   const pts = regs.map((r, i) => {
     const popup = document.createElement('div');
@@ -883,7 +994,7 @@ $('btnMapaInsp').addEventListener('click', async () => {
   });
   if (regs.length > 1) L.polyline(pts, { color: '#ea7501', weight: 3, dashArray: '4 4', interactive: false }).addTo(camadaPontos);
   if (pts.length) mapa.fitBounds(pts, { padding: [40, 40], maxZoom: 18 });
-  else mapa.fitBounds(Rede.limites(estado.rede), { padding: [20, 20] });
+  else mapa.fitBounds(Rede.limites(redesNoMapa()), { padding: [20, 20] });
   seguirPosicao();
 });
 
@@ -982,7 +1093,7 @@ async function telaArquivos() {
   if (!rel.length) listaVazia($('listaRelatorios'), 'Nenhum relatório gerado ainda.');
   for (const f of rel) {
     const caminho = `${Pastas.RELATORIOS}/${f.nome}`;
-    $('listaRelatorios').appendChild(itemArquivo(f.nome.endsWith('.pdf') ? '📕' : '📘', f.nome, `${dataCurta(f.modificado)} · ${mb(f.tamanho)}`,
+    $('listaRelatorios').appendChild(itemArquivo(f.nome.endsWith('.pdf') ? '📕' : f.nome.endsWith('.kmz') ? '🗺️' : '📘', f.nome, `${dataCurta(f.modificado)} · ${mb(f.tamanho)}`,
       async () => oferecerArquivo(await Pastas.ler(caminho), {
         titulo: 'Relatório', pastaInfo: 'Pasta Relatórios do app.',
         aoExcluir: async () => { await Pastas.remover(caminho); telaArquivos(); },
