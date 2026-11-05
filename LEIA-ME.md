@@ -26,7 +26,7 @@ A versão 2.0 parte da 1.0 (pasta `app/`, que continua publicada e sem alteraç�
   - uma pasta para cada rede carregada, com uma subpasta por tipo de equipamento. Os postes vêm desligados ao abrir.
   - Se o navegador do celular não compartilhar o .kmz, use "Salvar os arquivos em Downloads".
 - **Minha posição no mapa**: o mapa da inspeção mostra a posição atual (ponto azul com o círculo de precisão do GPS). O botão abaixo do zoom centraliza o mapa nela; no "Escolher no mapa" ele também liga o GPS. A busca para quando o mapa fecha.
-- **Escolher camadas**: o botão de camadas, no canto do mapa, liga e desliga cada tipo de equipamento. O app lembra a escolha.
+- **Escolher camadas**: o botão **Camadas**, no canto do mapa, liga e desliga cada tipo de equipamento. O app lembra a escolha.
 - **Equipamento no registro**: tocar num equipamento mostra código, potência, fases e estado normal (aberta ou fechada). Ao escolher o ponto de um registro, dá para usar a posição do equipamento e citá-lo na descrição.
 - **Uso offline**: a rede de um alimentador já aberto fica guardada no aparelho e funciona sem internet. Abra a inspeção com internet antes de ir a campo.
 - **Relatório**: a página de estatísticas mostra a distribuidora.
@@ -34,7 +34,7 @@ A versão 2.0 parte da 1.0 (pasta `app/`, que continua publicada e sem alteraç�
 
 ## Uso
 1. **Nova inspeção**: escolha a distribuidora, o alimentador e a qualidade das fotos no relatório. A qualidade pode ser baixa (cerca de 0,1 MB por foto), média (0,3 MB) ou alta (1 MB). Tudo isso pode ser trocado depois em "Alterar".
-   - Ao lado da qualidade aparece o máximo de registros com foto para o relatório ficar com até 25 MB, o limite comum de anexo de e-mail: cerca de 240 na baixa, 80 na média e 24 na alta. É uma estimativa pelo tamanho médio das fotos. Se a inspeção passar desse número, o aviso fica em vermelho.
+   - Na tela da inspeção aparece, por exemplo, "Fotos: qualidade média (máx. ~80)": o máximo de registros com foto para o relatório ficar com até 25 MB, o limite comum de anexo de e-mail: cerca de 240 na baixa, 80 na média e 24 na alta. É uma estimativa pelo tamanho médio das fotos. Se a inspeção passar desse número, o aviso fica em vermelho.
 2. **Novo registro**: preencha alimentador, tipo de irregularidade, descrição, data/hora, localização e, se quiser, a foto.
    - **A foto é opcional.** Um registro sem foto aparece no relatório como "Registro N (sem foto)", com um quadro vazio no lugar da imagem, e entra no .kmz e na tabela de registros. "Remover foto" tira a foto de um registro.
    - A localização vem do GPS, que continua buscando até a precisão ficar abaixo de 5 m. Também dá para digitá-la ou escolhê-la no mapa, com a rede.

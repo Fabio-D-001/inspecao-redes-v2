@@ -173,7 +173,7 @@ const QUALIDADES = Relatorio.QUALIDADES;
 const qualidadeDe = insp => (QUALIDADES[insp.qualidade] ? insp.qualidade : 'media');
 $('dlgQualidade').append(...Object.entries(QUALIDADES).map(([v, q]) => new Option(q.rotulo, v)));
 // Quantos registros com foto cabem num relatório que ainda dá para enviar por e-mail.
-const maxRegistros = q => `máx. ~${q.maxRegistros} registros com foto (relatório de até ${Relatorio.LIMITE_MB} MB, para e-mail)`;
+const maxRegistros = q => `máx. ~${q.maxRegistros} registros com foto, para o relatório ficar com até ${Relatorio.LIMITE_MB} MB (e-mail)`;
 const dicaQualidade = () => {
   const q = QUALIDADES[$('dlgQualidade').value];
   $('dlgQualidadeDica').textContent = `${q.dica}; ${maxRegistros(q)}.`;
@@ -465,8 +465,8 @@ async function telaInspecao(id) {
   atualizarBotaoMapa();
   const q = QUALIDADES[qualidadeDe(insp)];
   const comFoto = regs.filter(r => r.foto).length;
-  $('qualidadeAtual').textContent = `Fotos no relatório: qualidade ${q.rotulo.toLowerCase()} · ${maxRegistros(q)}` +
-    (comFoto > q.maxRegistros ? `. Esta inspeção já tem ${comFoto}: use uma qualidade menor para enviar por e-mail.` : '');
+  $('qualidadeAtual').textContent = `Fotos: qualidade ${q.rotulo.toLowerCase()} (máx. ~${q.maxRegistros})` +
+    (comFoto > q.maxRegistros ? ` · já são ${comFoto}` : '');
   $('qualidadeAtual').className = comFoto > q.maxRegistros ? 'erro-texto' : '';
 
   const ul = $('listaRegistros');
@@ -776,7 +776,9 @@ function camadasBase(m) {
     maxZoom: 19, attribution: 'Imagens © Esri',
   });
   ruas.addTo(m);
-  return L.control.layers({ 'Ruas': ruas, 'Satélite': satelite }).addTo(m);
+  const controle = L.control.layers({ 'Ruas': ruas, 'Satélite': satelite }).addTo(m);
+  controle.getContainer().querySelector('.leaflet-control-layers-toggle').textContent = 'Camadas';
+  return controle;
 }
 
 // Põe no mini-mapa as redes ligadas (redesNoMapa), trocando as anteriores, com o código dos equipamentos

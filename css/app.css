@@ -174,3 +174,7 @@ h2 { color: var(--laranja-escuro); }
   border: 1px dashed var(--borda); border-radius: 6px; font-size: 11px; color: var(--suave); text-align: center; }
 #btnRemoverFoto { margin-top: 8px; }
 .alim small.erro-texto { color: var(--perigo); }
+/* Botão de camadas com o nome escrito */
+.leaflet-control-layers-toggle, .leaflet-touch .leaflet-control-layers-toggle { width: auto; height: 34px; padding: 0 10px 0 34px;
+  background-position: 7px center; background-size: 22px 22px; font: 600 13px/34px system-ui, sans-serif; color: #333;
+  text-decoration: none; white-space: nowrap; }
