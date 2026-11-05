@@ -1,7 +1,7 @@
 // Service worker: guarda o aplicativo para uso offline, as áreas do mapa já visitadas e a rede
 // dos alimentadores já abertos. Os nomes dos caches começam com "v2-" porque a versão 1.0 usa o
 // mesmo endereço (github.io) e o mesmo armazenamento de caches.
-const VERSAO = '2.3.1';
+const VERSAO = '2.4.0';
 const APP = `v2-app-${VERSAO}`;
 const MAPA = 'v2-mapa-tiles';
 const DADOS = 'v2-dados-2025';
@@ -33,7 +33,12 @@ self.addEventListener('activate', e => {
 
 const ehTile = url => url.hostname === 'tile.openstreetmap.org' || url.hostname === 'server.arcgisonline.com';
 
+// Conferir o limite lista todo o cache (milhares de itens): faz isso só a cada 50 arquivos novos, e não a
+// cada imagem do mapa, o que atrasava o fundo do mapa ao arrastar.
+const novos = {};
 async function limitar(nome, max) {
+  novos[nome] = (novos[nome] || 0) + 1;
+  if (novos[nome] % 50 !== 1) return;
   const cache = await caches.open(nome);
   const chaves = await cache.keys();
   for (let i = 0; i < chaves.length - max; i++) await cache.delete(chaves[i]);

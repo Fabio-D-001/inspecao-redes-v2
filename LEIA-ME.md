@@ -1,4 +1,4 @@
-# Inspeção de Redes 2.0 — app offline
+# Inspeção de Redes 2.0 — app offline (versão 2.4)
 
 Aplicativo web instalável (PWA) para registro fotográfico georreferenciado de irregularidades em redes de distribuição, com relatório em .docx e .pdf no layout do modelo `Relatorio_Fotografico_2026-10-29_1849.docx`.
 
@@ -15,6 +15,7 @@ A versão 2.0 parte da 1.0 (pasta `app/`, que continua publicada e sem alteraç�
   - reguladores de tensão e bancos de capacitores;
   - postes (só com zoom alto);
   - subestação.
+- **Zoom dos pontos**: os transformadores e as chaves fusíveis e seccionadoras aparecem a partir do zoom 14, e os postes a partir do 16. Com o mapa mais afastado, aparecem a rede, a subestação, os religadores, os reguladores e os capacitores. O botão Camadas mostra esse limite ao lado de cada tipo, e ligar e desligar continua igual.
 - **Código dos equipamentos no mapa**: com o mapa bem aproximado (zoom 17 ou mais), cada equipamento das camadas ligadas mostra o seu código: transformadores, chaves, religadores, reguladores, capacitores e subestação. Vale no mapa e no mini-mapa do registro, que agora mostra também os equipamentos. O mini-mapa segue as camadas escolhidas no mapa grande.
 - **Rede de outros alimentadores, no mapa**: o botão **+ Alimentador**, no canto do mapa, carrega a rede de qualquer alimentador da lista, inclusive de outra distribuidora. No botão de camadas:
   - a seção "Alimentadores" liga e desliga a rede de cada alimentador, e o app lembra a escolha em cada inspeção;
@@ -65,6 +66,15 @@ Os caches do service worker começam com `v2-`, porque as duas versões estão n
 
 ## Mapa
 O mapa ocupa a tela toda, sem mensagens no topo: só o botão Fechar.
+
+### Desempenho (versão 2.4)
+Um alimentador grande tem mais de 20 mil postes e 6 mil equipamentos, e o mapa travava a cada zoom ou arrasto. Desde a 2.4:
+- os pontos (equipamentos e postes) só são criados e desenhados na área visível do mapa, com folga, e só a partir do zoom de cada tipo;
+- todos os alimentadores usam um só desenho (canvas), e os trechos de rede de cada tipo formam uma só linha;
+- as imagens do fundo do mapa só são pedidas no fim do gesto de zoom;
+- o service worker confere o limite do cache de imagens a cada 50 imagens novas, e não a cada uma.
+
+Medido no computador com CHP12 e PPR01_AL024 (os dois maiores da base) no mesmo mapa: abrir o mapa caiu de ~455 para ~125 ms; uma sequência de 10 zooms, de ~2,6 s para ~0,4 s; cada arrasto, de ~30 para ~2 ms.
 
 ## Mapa offline
 O mapa de fundo (OpenStreetMap / satélite Esri) precisa de internet. As áreas já vistas ficam guardadas.

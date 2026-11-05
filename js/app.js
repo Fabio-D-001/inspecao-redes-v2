@@ -769,11 +769,12 @@ $('btnExcluirReg').addEventListener('click', async () => {
 /* ------------------------------ mapa ------------------------------ */
 
 function camadasBase(m) {
+  // updateWhenZooming: as imagens do fundo só são pedidas no fim do gesto de zoom, não a cada passo dele.
   const ruas = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, attribution: '© OpenStreetMap',
+    maxZoom: 19, attribution: '© OpenStreetMap', updateWhenZooming: false,
   });
   const satelite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 19, attribution: 'Imagens © Esri',
+    maxZoom: 19, attribution: 'Imagens © Esri', updateWhenZooming: false,
   });
   ruas.addTo(m);
   const controle = L.control.layers({ 'Ruas': ruas, 'Satélite': satelite }).addTo(m);

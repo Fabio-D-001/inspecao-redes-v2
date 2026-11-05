@@ -17,17 +17,18 @@ const Rede = (() => {
   const PROTECAO = [29, 30, 32, 35, 36, 53];
   const grupoChave = tip => (FUSIVEIS.includes(+tip) ? 'fusiveis' : PROTECAO.includes(+tip) ? 'religadores' : 'seccionadoras');
 
-  // Ordem e aparência das camadas. "padrao": aparece ao abrir o mapa pela primeira vez.
+  // Ordem e aparência das camadas. "padrao": aparece ao abrir o mapa pela primeira vez. "zoom": só aparece
+  // a partir desse zoom (com o mapa afastado, milhares de pontos sobrepostos só deixam o mapa lento).
   const CAMADAS = [
     { chave: 'rede3', rotulo: 'Rede primária trifásica', cor: '#c1121f', linha: true, padrao: true },
     { chave: 'rede1', rotulo: 'Rede primária mono/bifásica', cor: '#e85d04', linha: true, padrao: true },
-    { chave: 'trafos', rotulo: 'Transformadores', cor: '#7b2cbf', raio: 5, padrao: true },
-    { chave: 'fusiveis', rotulo: 'Chaves fusíveis', cor: '#2a9d8f', raio: 4, padrao: true },
-    { chave: 'seccionadoras', rotulo: 'Chaves seccionadoras', cor: '#0062ab', raio: 4, padrao: true },
+    { chave: 'trafos', rotulo: 'Transformadores', nota: 'com zoom ≥ 14', zoom: 14, cor: '#7b2cbf', raio: 5, padrao: true },
+    { chave: 'fusiveis', rotulo: 'Chaves fusíveis', nota: 'com zoom ≥ 14', zoom: 14, cor: '#2a9d8f', raio: 4, padrao: true },
+    { chave: 'seccionadoras', rotulo: 'Chaves seccionadoras', nota: 'com zoom ≥ 14', zoom: 14, cor: '#0062ab', raio: 4, padrao: true },
     { chave: 'religadores', rotulo: 'Religadores, disjuntores e seccionalizadores', cor: '#212529', borda: '#ffd60a', raio: 6, padrao: true },
     { chave: 'reguladores', rotulo: 'Reguladores de tensão', cor: '#4f772d', raio: 6, padrao: true },
     { chave: 'capacitores', rotulo: 'Bancos de capacitores', cor: '#9c6644', raio: 6, padrao: true },
-    { chave: 'postes', rotulo: 'Postes', nota: 'com zoom ≥ 16', cor: '#6c757d', raio: 2.5, padrao: false },
+    { chave: 'postes', rotulo: 'Postes', nota: 'com zoom ≥ 16', zoom: 16, cor: '#6c757d', raio: 2.5, padrao: false },
     { chave: 'sub', rotulo: 'Subestação', cor: '#ffd60a', borda: '#212529', raio: 9, padrao: true },
   ];
 
@@ -121,53 +122,85 @@ const Rede = (() => {
     return lls;
   });
 
+  // Pontos de uma camada (equipamentos ou postes) desenhados só na área visível do mapa, com folga, e só a
+  // partir de "zoom". Desenhar todos travava o mapa: um alimentador grande tem mais de 20 mil postes, e o
+  // mapa recalculava todos a cada movimento, mesmo os escondidos. Cada ponto é criado na primeira vez que
+  // entra na tela.
+  const Pontos = L.Layer.extend({
+    initialize(lat, lon, criar, zoom) {
+      this._lat = lat; this._lon = lon; this._criar = criar; this._zoom = zoom || 0; this._feitos = new Map();
+    },
+    onAdd(m) { m.on('moveend', this._atualizar, this); m.whenReady(this._atualizar, this); },
+    onRemove(m) {
+      m.off('moveend', this._atualizar, this);
+      this._feitos.forEach(mk => { if (mk._map) m.removeLayer(mk); });
+    },
+    _atualizar() {
+      const m = this._map;
+      if (!m) return;
+      const area = m.getZoom() >= this._zoom ? m.getBounds().pad(0.5) : null;
+      if (!area) { this._feitos.forEach(mk => { if (mk._map) m.removeLayer(mk); }); return; }
+      const s = area.getSouth(), n = area.getNorth(), o = area.getWest(), l = area.getEast();
+      const { _lat: lat, _lon: lon, _feitos: feitos } = this;
+      for (let i = 0; i < lat.length; i++) {
+        let mk = feitos.get(i);
+        if (lat[i] >= s && lat[i] <= n && lon[i] >= o && lon[i] <= l) {
+          if (!mk) feitos.set(i, mk = this._criar(i));
+          if (!mk._map) m.addLayer(mk);
+        } else if (mk && mk._map) m.removeLayer(mk);
+      }
+    },
+  });
+
+  // Um desenho (canvas) por mapa e painel, para todos os alimentadores: cada canvas a mais é redesenhado a
+  // cada movimento do mapa.
+  function desenho(m, painel) {
+    const k = `_redeDesenho_${painel || 'rede'}`;
+    return m[k] || (m[k] = painel ? L.canvas({ padding: 0.3, pane: painel }) : L.canvas({ padding: 0.3 }));
+  }
+
   // Monta as camadas dos alimentadores "redes" (lista de dados) para o mapa "m". aoTocar(item) recebe o
   // equipamento tocado. Devolve [{ chave, rotulo (HTML com a cor), camada, visivel, pontos }], só das
   // camadas com algo; "pontos" são os equipamentos com código, para os rótulos.
   function camadas(m, redes, { aoTocar = null, interativo = true, so = null } = {}) {
-    if (!m.getPane('postes')) {
-      m.createPane('postes').style.zIndex = 390;
-      const ajustar = () => { m.getPane('postes').style.display = m.getZoom() >= 16 ? '' : 'none'; };
-      m.on('zoomend', ajustar); ajustar();
-    }
-    const canvas = L.canvas({ padding: 0.3 });
-    const canvasPostes = L.canvas({ padding: 0.3, pane: 'postes' });
+    if (!m.getPane('postes')) m.createPane('postes').style.zIndex = 390;
+    const canvas = desenho(m);
+    const canvasPostes = desenho(m, 'postes');
     const saida = [];
     for (const c of CAMADAS) {
       if (so && !so.includes(c.chave)) continue;
-      const grupo = L.featureGroup();
+      let camada, n = 0;
       const pontos = [];
-      let n = 0;
-      for (const d of redes) {
-        if (c.linha) {
-          for (const lls of linhas(d, c.chave)) {
-            L.polyline(lls, { renderer: canvas, color: c.cor, weight: c.chave === 'rede3' ? 3 : 2, opacity: 0.85,
-              dashArray: c.chave === 'rede1' ? '6 4' : null, interactive: false }).addTo(grupo);
-            n++;
-          }
-        } else if (c.chave === 'postes') {
-          const p = d.postes || [];
-          for (let i = 0; i < p.length; i += 2) {
-            L.circleMarker([p[i + 1], p[i]], { renderer: canvasPostes, pane: 'postes', radius: c.raio, color: '#fff', weight: 1,
-              fillColor: c.cor, fillOpacity: 1, interactive: false }).addTo(grupo);
-            n++;
-          }
-        } else {
-          for (const it of itens(d, c.chave)) {
-            const mk = L.circleMarker(it.ll, { renderer: canvas, radius: c.raio, color: c.borda || '#fff', weight: c.borda ? 2 : 1,
-              fillColor: it.aberta ? '#fff' : c.cor, fillOpacity: 1, interactive: interativo });
-            if (it.aberta) mk.setStyle({ color: c.cor, weight: 2 });
-            if (interativo && aoTocar) mk.on('click', () => aoTocar(it));
-            mk.addTo(grupo);
-            if (it.cod) pontos.push(it);
-            n++;
-          }
-        }
+      if (c.linha) {
+        // uma só linha com todos os trechos (milhares de objetos separados deixavam o zoom lento)
+        const partes = [].concat(...redes.map(d => linhas(d, c.chave)));
+        n = partes.length;
+        camada = L.polyline(partes, { renderer: canvas, color: c.cor, weight: c.chave === 'rede3' ? 3 : 2, opacity: 0.85,
+          dashArray: c.chave === 'rede1' ? '6 4' : null, interactive: false });
+      } else if (c.chave === 'postes') {
+        const p = [].concat(...redes.map(d => d.postes || []));
+        n = p.length / 2;
+        const lat = new Float64Array(n), lon = new Float64Array(n);
+        for (let i = 0; i < n; i++) { lon[i] = p[2 * i]; lat[i] = p[2 * i + 1]; }
+        camada = new Pontos(lat, lon, i => L.circleMarker([lat[i], lon[i]], { renderer: canvasPostes, pane: 'postes',
+          radius: c.raio, color: '#fff', weight: 1, fillColor: c.cor, fillOpacity: 1, interactive: false }), c.zoom);
+      } else {
+        const lista = [].concat(...redes.map(d => itens(d, c.chave)));
+        n = lista.length;
+        for (const it of lista) if (it.cod) pontos.push(it);
+        camada = new Pontos(Float64Array.from(lista, it => it.ll.lat), Float64Array.from(lista, it => it.ll.lng), i => {
+          const it = lista[i];
+          const mk = L.circleMarker(it.ll, { renderer: canvas, radius: c.raio, color: c.borda || '#fff', weight: c.borda ? 2 : 1,
+            fillColor: it.aberta ? '#fff' : c.cor, fillOpacity: 1, interactive: interativo });
+          if (it.aberta) mk.setStyle({ color: c.cor, weight: 2 });
+          if (interativo && aoTocar) mk.on('click', () => aoTocar(it));
+          return mk;
+        }, c.zoom);
       }
       if (!n) continue;
       const rot = `<span class="leg${c.linha ? ' leg-linha' : ''}" style="background:${c.cor}"></span>${c.rotulo}` +
         (c.linha ? '' : ` <small>(${n})${c.nota ? `, ${c.nota}` : ''}</small>`);
-      saida.push({ chave: c.chave, rotulo: rot, camada: grupo, visivel: visivel(c), pontos, n, linha: !!c.linha,
+      saida.push({ chave: c.chave, rotulo: rot, camada, visivel: visivel(c), pontos, n, linha: !!c.linha,
         base: `<span class="leg${c.linha ? ' leg-linha' : ''}" style="background:${c.cor}"></span>${c.rotulo}`, nota: c.nota || '' });
     }
     return saida;
